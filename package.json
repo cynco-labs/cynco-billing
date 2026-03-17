@@ -1,0 +1,72 @@
+{
+  "name": "@cynco/pay",
+  "version": "0.1.0",
+  "description": "Accept payments with 3 API calls. Accounting happens automatically.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    },
+    "./webhooks": {
+      "types": "./dist/webhooks.d.ts",
+      "import": "./dist/webhooks.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "tsc"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "react": "^19.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/cynco-tech/cynco-pay#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cynco-tech/cynco-pay"
+  },
+  "bugs": {
+    "url": "https://github.com/cynco-tech/cynco-pay/issues"
+  },
+  "keywords": [
+    "payments",
+    "billing",
+    "subscriptions",
+    "accounting",
+    "saas",
+    "metering",
+    "usage-based",
+    "entitlements",
+    "cynco",
+    "chip",
+    "stripe",
+    "general-ledger"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
