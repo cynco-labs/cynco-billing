@@ -17,6 +17,8 @@ await pay.track("user_123", "api_calls");
 
 Every payment auto-posts to the general ledger. One integration replaces Stripe + QuickBooks.
 
+**No Stripe key needed. No CHIP key needed.** Just `cp_sk_...` — we handle the payment gateway for you.
+
 ## Install
 
 ```bash

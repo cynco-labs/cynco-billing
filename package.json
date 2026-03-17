@@ -44,13 +44,13 @@
     "vitest": "^3.0.0"
   },
   "license": "MIT",
-  "homepage": "https://github.com/cynco-tech/cynco-pay#readme",
+  "homepage": "https://github.com/cynco-tech/pay-sdk#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cynco-tech/cynco-pay"
+    "url": "https://github.com/cynco-tech/pay-sdk"
   },
   "bugs": {
-    "url": "https://github.com/cynco-tech/cynco-pay/issues"
+    "url": "https://github.com/cynco-tech/pay-sdk/issues"
   },
   "keywords": [
     "payments",
