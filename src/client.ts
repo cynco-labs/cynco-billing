@@ -13,6 +13,14 @@ import type {
   Product,
   CreateWebhookInput,
   WebhookEndpoint,
+  CreateCouponInput,
+  ValidateCouponInput,
+  UpdateCouponInput,
+  SetSpendCapInput,
+  SetProductSpendCapInput,
+  CreateRewardProgramInput,
+  CreateReferralCodeInput,
+  RedeemReferralInput,
 } from "./types.js";
 
 const DEFAULT_BASE_URL = "https://app.cynco.io";
@@ -303,6 +311,85 @@ export class CyncoPay {
   /** Delete a webhook endpoint. */
   async deleteWebhook(id: string): Promise<void> {
     await this.request("DELETE", `/api/v1/pay/webhooks?id=${encodeURIComponent(id)}`);
+  }
+
+  // ── Coupons ──────────────────────────────────────────────────────────────
+
+  /** List all coupons. Supports pagination via query params. */
+  async listCoupons(): Promise<Record<string, unknown>[]> {
+    return this.get("/api/v1/pay/coupons");
+  }
+
+  /** Create a coupon. */
+  async createCoupon(input: CreateCouponInput): Promise<Record<string, unknown>> {
+    return this.post("/api/v1/pay/coupons", input);
+  }
+
+  /** Get a coupon by ID. */
+  async getCoupon(id: string): Promise<Record<string, unknown>> {
+    return this.get(`/api/v1/pay/coupons/${encodeURIComponent(id)}`);
+  }
+
+  /** Update a coupon by ID. */
+  async updateCoupon(id: string, input: UpdateCouponInput): Promise<Record<string, unknown>> {
+    return this.request("PATCH", `/api/v1/pay/coupons/${encodeURIComponent(id)}`, input);
+  }
+
+  /** Archive a coupon by ID (shorthand for updateCoupon with status: "archived"). */
+  async archiveCoupon(id: string): Promise<Record<string, unknown>> {
+    return this.request("PATCH", `/api/v1/pay/coupons/${encodeURIComponent(id)}`, { status: "archived" });
+  }
+
+  /**
+   * Validate a coupon code without redeeming it.
+   * Safe to call from client-side (supports publishable keys).
+   */
+  async validateCoupon(input: ValidateCouponInput): Promise<{ valid: boolean; discount?: Record<string, unknown> }> {
+    return this.post("/api/v1/pay/coupons/validate", input);
+  }
+
+  // ── Spend Caps ──────────────────────────────────────────────────────────
+
+  /** Get spend cap status for a customer's feature. */
+  async getSpendCap(customer: string, feature: string): Promise<Record<string, unknown>> {
+    return this.get(`/api/v1/pay/spend-caps?customer=${encodeURIComponent(customer)}&feature=${encodeURIComponent(feature)}`);
+  }
+
+  /** Set a spend cap on a customer's feature. Pass capCents: null to remove. */
+  async setSpendCap(input: SetSpendCapInput): Promise<Record<string, unknown>> {
+    return this.post("/api/v1/pay/spend-caps", input);
+  }
+
+  /** Set a product-level default spend cap for a feature. */
+  async setProductSpendCap(input: Omit<SetProductSpendCapInput, "scope">): Promise<Record<string, unknown>> {
+    return this.post("/api/v1/pay/spend-caps", { ...input, scope: "product" });
+  }
+
+  // ── Rewards ─────────────────────────────────────────────────────────────
+
+  /** List reward programs. */
+  async listRewardPrograms(): Promise<Record<string, unknown>[]> {
+    return this.get("/api/v1/pay/rewards");
+  }
+
+  /** List referral codes for a customer. */
+  async listReferralCodes(customer: string): Promise<Record<string, unknown>[]> {
+    return this.get(`/api/v1/pay/rewards?customer=${encodeURIComponent(customer)}`);
+  }
+
+  /** Create a reward program. */
+  async createRewardProgram(input: CreateRewardProgramInput): Promise<Record<string, unknown>> {
+    return this.post("/api/v1/pay/rewards", input);
+  }
+
+  /** Create a referral code for a customer under a reward program. */
+  async createReferralCode(input: CreateReferralCodeInput): Promise<Record<string, unknown>> {
+    return this.post("/api/v1/pay/rewards?action=code", input);
+  }
+
+  /** Redeem a referral code. Atomically validates limits and applies the reward. */
+  async redeemReferralCode(input: RedeemReferralInput): Promise<Record<string, unknown>> {
+    return this.post("/api/v1/pay/rewards?action=redeem", input);
   }
 
   // ── HTTP Layer ───────────────────────────────────────────────────────────

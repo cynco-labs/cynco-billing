@@ -104,6 +104,76 @@ export interface CreateWebhookInput {
   events?: string[];
 }
 
+export interface CreateCouponInput {
+  code: string;
+  name?: string;
+  type: "percentage" | "fixed" | "trial_extension";
+  value: number;
+  duration: "once" | "repeating" | "forever";
+  durationMonths?: number;
+  maxRedemptions?: number;
+  maxRedemptionsPerCustomer?: number;
+  minimumAmount?: number;
+  productIds?: string[];
+  validFrom?: string;
+  validUntil?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SetSpendCapInput {
+  customer: string;
+  feature: string;
+  capCents: number | null;
+}
+
+export interface SetProductSpendCapInput {
+  productId: string;
+  featureId: string;
+  capCents: number | null;
+  scope: "product";
+}
+
+export interface CreateRewardProgramInput {
+  name: string;
+  rewardType: "free_product" | "percentage_discount" | "fixed_discount" | "credit";
+  rewardValue: number;
+  rewardProductId?: string;
+  trigger?: "referral_signup" | "referral_subscribe";
+  maxRedemptions?: number;
+  maxPerReferrer?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateReferralCodeInput {
+  programId: string;
+  customer: string;
+  code: string;
+  maxRedemptions?: number;
+  expiresAt?: string;
+}
+
+export interface RedeemReferralInput {
+  programId: string;
+  code: string;
+  customer: string;
+}
+
+export interface ValidateCouponInput {
+  code: string;
+  customer: string;
+  product: string;
+  amount: number;
+}
+
+export interface UpdateCouponInput {
+  name?: string;
+  status?: "active" | "archived";
+  maxRedemptions?: number | null;
+  maxRedemptionsPerCustomer?: number;
+  validUntil?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
 // ── API Responses ────────────────────────────────────────────────────────────
 
 export interface ApiResponse<T> {
@@ -195,6 +265,7 @@ export type WebhookEventType =
   | "subscription.renewed"
   | "subscription.upgraded"
   | "subscription.downgraded"
+  | "subscription.updated"
   | "subscription.canceled"
   | "subscription.expired"
   | "subscription.paused"
@@ -204,7 +275,8 @@ export type WebhookEventType =
   | "payment.refunded"
   | "invoice.created"
   | "invoice.paid"
-  | "entitlement.exhausted";
+  | "entitlement.exhausted"
+  | "entitlement.threshold_reached";
 
 export interface WebhookEvent {
   id: string;

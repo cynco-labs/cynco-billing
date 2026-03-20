@@ -1,6 +1,6 @@
 {
   "name": "@cynco/pay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Accept payments with 3 API calls. Accounting happens automatically.",
   "type": "module",
   "main": "./dist/index.js",

@@ -16,4 +16,12 @@ export type {
   WebhookEvent,
   WebhookEventType,
   ApiError,
+  CreateCouponInput,
+  ValidateCouponInput,
+  UpdateCouponInput,
+  SetSpendCapInput,
+  SetProductSpendCapInput,
+  CreateRewardProgramInput,
+  CreateReferralCodeInput,
+  RedeemReferralInput,
 } from "./types.js";
