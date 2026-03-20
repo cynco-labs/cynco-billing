@@ -1,47 +1,23 @@
-<div align="center">
-
 # @cynco/pay
 
-**Billing for developers who'd rather ship product.**
-
-Subscribe customers, gate features, meter usage -- in 3 API calls.<br>
-Every charge auto-posts to the general ledger.
-
-[![npm](https://img.shields.io/npm/v/@cynco/pay)](https://www.npmjs.com/package/@cynco/pay)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)](https://www.typescriptlang.org)
-[![Bundle Size](https://img.shields.io/bundlephobia/minzip/@cynco/pay)](https://bundlephobia.com/package/@cynco/pay)
-
-[Documentation](https://docs.cynco.io/pay) · [Dashboard](https://app.cynco.io) · [Discord](https://discord.gg/cynco)
-
-</div>
-
----
+Accept payments with 3 API calls. Accounting happens automatically.
 
 ```ts
 const pay = new CyncoPay({ key: "cp_sk_..." });
 
+// Subscribe a customer
 await pay.subscribe({ customer: "user_123", product: "pro", successUrl: "/thanks" });
+
+// Check if they can use a feature
 const { allowed } = await pay.check("user_123", "api_calls");
+
+// Track usage
 await pay.track("user_123", "api_calls");
 ```
 
----
+Every payment auto-posts to the general ledger. One integration replaces Stripe + QuickBooks.
 
-## Why Cynco Pay
-
-One SDK replaces your payment gateway, entitlement engine, and accounting integration. Every subscription, charge, and refund auto-posts to the general ledger with correct double-entry journal entries. No reconciliation spreadsheets. No Stripe key needed, no CHIP key needed -- just `cp_sk_...`.
-
-| | Cynco Pay | Stripe + QuickBooks |
-|---|---|---|
-| Subscribe a customer | 1 call | Stripe checkout + webhook + QBO invoice |
-| Gate a feature | 1 call | Custom entitlement table + cache layer |
-| Track usage | 1 call | Stripe metering API + QBO sync job |
-| GL journal entries | Automatic | Manual or 3rd-party sync |
-| Balance locking (AI) | Built-in | Build it yourself |
-| Malaysian payments | Native (CHIP) | Not supported |
-
----
+**No Stripe key needed. No CHIP key needed.** Just `cp_sk_...` — we handle the payment gateway for you.
 
 ## Install
 
@@ -49,25 +25,18 @@ One SDK replaces your payment gateway, entitlement engine, and accounting integr
 npm install @cynco/pay
 ```
 
-```bash
-yarn add @cynco/pay
-```
-
-```bash
-pnpm add @cynco/pay
-```
-
-```bash
-bun add @cynco/pay
-```
-
----
-
-## Quick Start
+## Quick Start (5 minutes)
 
 ### 1. Get your API key
 
-Create a key in your [Cynco dashboard](https://app.cynco.io) under Settings > API Keys.
+Create a key in your [Cynco dashboard](https://app.cynco.io) or via the API:
+
+```bash
+curl -X POST https://app.cynco.io/api/v1/pay/api-keys \
+  -H "Authorization: Bearer cp_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Production", "type": "secret" }'
+```
 
 ### 2. Create a product
 
@@ -97,53 +66,50 @@ const result = await pay.subscribe({
   cancelUrl: "https://yourapp.com/billing",
 });
 
-if (result.url) redirect(result.url);       // redirect to checkout
-else console.log(result.subscription);       // activated immediately
+if (result.url) {
+  // Redirect to checkout
+  redirect(result.url);
+} else {
+  // Activated immediately (stored card charged)
+  console.log(result.subscription);
+}
 ```
 
 ### 4. Gate features
 
 ```ts
-const { allowed } = await pay.check("user_123", "api_calls");
+const { allowed, balance } = await pay.check("user_123", "api_calls");
 
-if (!allowed) return new Response("Upgrade required", { status: 402 });
+if (!allowed) {
+  return new Response("Upgrade required", { status: 402 });
+}
 
+// Do the work, then track
 await pay.track("user_123", "api_calls");
 ```
 
-That's it. Subscribed, gated, metered, billed. GL entries posted automatically.
+That's it. The customer is subscribed, gated, metered, and billed. GL entries posted automatically.
 
 ---
 
-## Patterns
+## Core Concepts
 
-### Feature Gating
+### Check + Track (two-call pattern)
 
-```ts
-// Boolean feature -- returns allowed: true/false
-const { allowed } = await pay.check("user_123", "sso");
-
-// Metered feature -- check balance before work
-const { allowed, balance } = await pay.check("user_123", "api_calls");
+```
+check → allowed? → do work → track
 ```
 
-### Usage Metering
+`check` tells you if the customer has access. `track` records usage and decrements the balance. For high-concurrency scenarios, use the atomic one-call pattern:
 
 ```ts
-// Two-call pattern: check, then track
-const { allowed } = await pay.check("user_123", "api_calls");
-if (allowed) {
-  doWork();
-  await pay.track("user_123", "api_calls");
-}
-
-// Atomic one-call pattern: check + deduct in one roundtrip, zero race conditions
+// Atomic check + deduct in one call — zero race conditions
 const { allowed } = await pay.check("user_123", "api_calls", { sendEvent: true });
 ```
 
-### Balance Locking (for AI)
+### Balance Locking (for AI completions)
 
-Reserve tokens before a completion, finalize with actual usage. Purpose-built for LLM applications where cost is unknown upfront.
+When you don't know the final cost upfront:
 
 ```ts
 // 1. Reserve tokens
@@ -153,12 +119,10 @@ const { allowed, lockId } = await pay.check("user_123", "ai_tokens", {
   lock: { enabled: true, expiresAt: Date.now() + 60_000 },
 });
 
-if (!allowed) return new Response("Insufficient tokens", { status: 402 });
-
 // 2. Do the work
-const completion = await openai.chat.completions.create({ /* ... */ });
+const completion = await openai.chat.completions.create({ ... });
 
-// 3. Finalize with actual usage (unused tokens refunded automatically)
+// 3. Finalize with actual usage
 await pay.finalizeLock({
   lockId,
   action: "confirm",
@@ -166,71 +130,42 @@ await pay.finalizeLock({
 });
 ```
 
-### Per-Seat Billing
+Unused tokens are refunded automatically. Locks expire if you don't finalize.
+
+### Subscriptions
 
 ```ts
-// Add a seat
-await pay.createEntity({ customer: "org_123", entityId: "user_alice", featureId: "seats", name: "Alice" });
+// Subscribe (new, upgrade, or downgrade — handled automatically)
+await pay.subscribe({ customer: "user_123", product: "pro", successUrl: "..." });
 
-// Check + track at the entity level
-const { allowed } = await pay.check("org_123", "ai_messages", { entityId: "user_alice" });
-await pay.track("org_123", "ai_messages", { entityId: "user_alice", amount: 1 });
+// Cancel at end of billing period
+await pay.updateSubscription({ customer: "user_123", product: "pro", cancelAction: "cancel_end_of_cycle" });
 
-// Remove a seat (auto-decrements count)
-await pay.deleteEntity("org_123", "user_alice");
+// Uncancel
+await pay.updateSubscription({ customer: "user_123", product: "pro", cancelAction: "uncancel" });
+
+// Cancel immediately with prorated refund
+await pay.updateSubscription({ customer: "user_123", product: "pro", cancelAction: "cancel_immediately" });
 ```
 
-### Free Plan with Auto-Assign
-
-```ts
-await pay.createProduct({
-  name: "Free",
-  slug: "free",
-  autoEnable: true,  // auto-assigned when customer is created
-  prices: [{ type: "recurring", amount: 0, billingInterval: "month" }],
-  features: [
-    { slug: "api_calls", name: "API Calls", type: "metered", allowanceType: "fixed", allowance: 100 },
-  ],
-});
-```
-
-### Overage Billing
-
-```ts
-await pay.createProduct({
-  name: "Pay As You Go",
-  slug: "payg",
-  features: [{
-    slug: "notifications",
-    name: "Notifications",
-    type: "metered",
-    allowanceType: "fixed",
-    allowance: 1000,       // included free
-    overageAllowed: true,
-    overagePrice: 1,       // $0.01 per unit after allowance
-  }],
-});
-// Overage billed automatically at end of billing period
-```
-
-### Upgrade / Downgrade
+### Upgrade & Downgrade
 
 Upgrades charge a prorated amount immediately. Downgrades are scheduled at period end.
 
 ```ts
-// Preview the charge before committing
+// Preview what the customer will pay
 const preview = await pay.previewAttach("user_123", "enterprise");
-console.log(preview.lineItems);  // [{ title: "Enterprise", amount: 5000 }, { title: "Credit for Pro", amount: -1500 }]
-console.log(preview.total);      // 3500
+console.log(preview.lineItems); // [{ title: "Enterprise", amount: 5000 }, { title: "Credit for Pro", amount: -1500 }]
+console.log(preview.total);     // 3500
 
-// Execute
+// Execute the upgrade
 await pay.subscribe({ customer: "user_123", product: "enterprise" });
 ```
 
 ### Carry-Over on Upgrade
 
 ```ts
-// Carry unused balance from old plan to new plan
+// Carry unused balance from old plan
 await pay.subscribe({
   customer: "user_123",
   product: "enterprise",
@@ -245,192 +180,98 @@ await pay.subscribe({
 });
 ```
 
-### One-Off Purchase
+---
+
+## Pricing Models
+
+### Free Plan
+
+```ts
+await pay.createProduct({
+  name: "Free",
+  slug: "free",
+  autoEnable: true, // auto-assigned on customer creation
+  prices: [{ type: "recurring", amount: 0, billingInterval: "month" }],
+  features: [
+    { slug: "api_calls", name: "API Calls", type: "metered", allowanceType: "fixed", allowance: 100 },
+  ],
+});
+```
+
+### Usage-Based Pricing
+
+```ts
+await pay.createProduct({
+  name: "Pay As You Go",
+  slug: "payg",
+  features: [
+    {
+      slug: "notifications",
+      name: "Notifications",
+      type: "metered",
+      allowanceType: "fixed",
+      allowance: 1000, // included free
+      overageAllowed: true,
+      overagePrice: 1, // $0.01 per notification after included
+    },
+  ],
+});
+// Overage billed automatically at end of billing period
+```
+
+### One-Off Purchase (Credit Top-Up)
 
 ```ts
 await pay.subscribe({
   customer: "user_123",
   product: "credit_top_up",
-  quantity: 500,
+  quantity: 500, // buy 500 credits
   successUrl: "...",
 });
 ```
 
-### Cancel / Uncancel
+### Per-Seat Pricing
 
 ```ts
-// Cancel at end of billing period
-await pay.updateSubscription({ customer: "user_123", product: "pro", cancelAction: "cancel_end_of_cycle" });
+// Create a seat entity
+await pay.createEntity({ customer: "org_123", entityId: "user_alice", featureId: "seats", name: "Alice" });
 
-// Cancel immediately with prorated refund
-await pay.updateSubscription({ customer: "user_123", product: "pro", cancelAction: "cancel_immediately" });
+// Check entity-level balance
+const { allowed } = await pay.check("org_123", "ai_messages", { entityId: "user_alice" });
 
-// Uncancel
-await pay.updateSubscription({ customer: "user_123", product: "pro", cancelAction: "uncancel" });
+// Track entity-level usage
+await pay.track("org_123", "ai_messages", { entityId: "user_alice", amount: 1 });
 
-// Or use the shorthand
-await pay.cancel("user_123");
-await pay.cancel("user_123", { immediate: true, reason: "Customer request" });
+// Remove a seat (auto-decrements count)
+await pay.deleteEntity("org_123", "user_alice");
 ```
+
+### Tiered Pricing
+
+Graduated (each tier at its own rate) and volume (single rate by total) are both supported. Configure via product creation with `tiers` on the price.
 
 ---
 
-## React
+## Customers
 
-Three entry points: `@cynco/pay`, `@cynco/pay/react`, `@cynco/pay/webhooks`. React is an optional peer dependency.
+```ts
+// Idempotent get-or-create — safe to call on every login
+const customer = await pay.getOrCreateCustomer({
+  customerId: "user_123",
+  name: "Jane Doe",
+  email: "jane@example.com",
+});
 
-### Provider
+// Returns: subscriptions, balances, flags, payment methods
+console.log(customer.subscriptions);
+console.log(customer.balances.api_calls.remaining);
+console.log(customer.flags.sso); // boolean features as flags
 
-Wrap your app once. All hooks read from this context.
+// Update customer info
+await pay.updateCustomer({ customerId: "user_123", name: "Jane Smith" });
 
-```tsx
-import { CyncoPayProvider } from "@cynco/pay/react";
-
-function App() {
-  return (
-    <CyncoPayProvider
-      publishableKey="cp_pk_..."
-      customerId="user_123"
-      prefetch={["api_calls", "sso"]}
-    >
-      <Dashboard />
-    </CyncoPayProvider>
-  );
-}
-```
-
-`customerId` accepts a string or an async resolver:
-
-```tsx
-<CyncoPayProvider
-  publishableKey="cp_pk_..."
-  customerId={async () => {
-    const session = await getSession();
-    return session.userId;
-  }}
->
-```
-
-### useCyncoPay
-
-Core hook. Returns `subscribe`, `check`, `track`, and `refresh`.
-
-```tsx
-import { useCyncoPay } from "@cynco/pay/react";
-
-function UpgradeButton() {
-  const { subscribe, check } = useCyncoPay();
-  const isPro = check("premium").allowed;
-
-  return (
-    <button
-      disabled={isPro}
-      onClick={() => subscribe("pro", { successUrl: "/welcome" })}
-    >
-      {isPro ? "Current Plan" : "Upgrade to Pro"}
-    </button>
-  );
-}
-```
-
-### useBalance
-
-Reads cached entitlements for a specific feature.
-
-```tsx
-import { useBalance } from "@cynco/pay/react";
-
-function UsageBar() {
-  const { balance, granted, unlimited, loading } = useBalance("api_calls");
-
-  if (loading) return <Skeleton />;
-  if (unlimited) return <span>Unlimited</span>;
-
-  return <ProgressBar value={balance ?? 0} max={granted ?? 0} />;
-}
-```
-
-### useSubscriptions
-
-```tsx
-import { useSubscriptions } from "@cynco/pay/react";
-
-function AccountPage() {
-  const { subscriptions, loading, refresh } = useSubscriptions();
-
-  if (loading) return <Spinner />;
-
-  return subscriptions.map((s) => (
-    <div key={s.id}>{s.productSlug} -- {s.status}</div>
-  ));
-}
-```
-
-### useListPlans
-
-Lists plans with customer eligibility context (new, upgrade, downgrade, active).
-
-```tsx
-import { useListPlans, useCyncoPay } from "@cynco/pay/react";
-
-function PricingPage() {
-  const { data: plans, loading } = useListPlans();
-  const { subscribe } = useCyncoPay();
-
-  if (loading) return <Spinner />;
-
-  return plans?.map((plan) => (
-    <div key={plan.id}>
-      <h3>{plan.name}</h3>
-      <p>{plan.prices[0]?.amount / 100}/mo</p>
-      <button
-        disabled={plan.customerEligibility?.scenario === "active"}
-        onClick={() => subscribe(plan.slug)}
-      >
-        {plan.customerEligibility?.scenario === "active" ? "Current" : "Select"}
-      </button>
-    </div>
-  ));
-}
-```
-
-### useAggregateEvents
-
-Usage timeline data for charts. Pass directly to Recharts, Chart.js, etc.
-
-```tsx
-import { useAggregateEvents } from "@cynco/pay/react";
-
-function UsageChart() {
-  const { timeline, total, loading } = useAggregateEvents({
-    feature: "api_calls",
-    range: "30d",
-    groupBy: "day",
-  });
-
-  if (loading) return <Skeleton />;
-
-  return <LineChart data={timeline} />;
-}
-```
-
-### useEntity
-
-Entity-scoped check and track for per-seat or per-workspace billing.
-
-```tsx
-import { useEntity } from "@cynco/pay/react";
-
-function WorkspaceGuard({ workspaceId, children }) {
-  const { check } = useEntity(workspaceId);
-  const [allowed, setAllowed] = useState(false);
-
-  useEffect(() => {
-    check("workspace_access").then((r) => setAllowed(r.allowed));
-  }, [check]);
-
-  return allowed ? children : <UpgradePrompt />;
-}
+// Grant promotional credits (standalone balance)
+await pay.createBalance({ customer: "user_123", feature: "credits", grantedBalance: 500 });
 ```
 
 ---
@@ -439,33 +280,19 @@ function WorkspaceGuard({ workspaceId, children }) {
 
 ```ts
 import { verifyWebhook } from "@cynco/pay/webhooks";
-```
 
-Register an endpoint, then verify incoming events with HMAC-SHA256 signature validation.
-
-```ts
-// Register (save the secret -- shown only once)
-const webhook = await pay.createWebhook({
-  url: "https://yourapp.com/webhooks/cynco",
-  events: ["subscription.activated", "payment.failed", "entitlement.exhausted"],
-});
-```
-
-### Express
-
-```ts
-app.post("/webhooks/cynco", express.raw({ type: "application/json" }), (req, res) => {
-  const event = verifyWebhook(req.body, req.headers["x-cynco-signature"], WEBHOOK_SECRET);
+app.post("/webhooks/cynco", (req, res) => {
+  const event = verifyWebhook(req.body, req.headers["x-cynco-signature"], SECRET);
 
   switch (event.type) {
     case "subscription.activated":
-      enableAccess(event.data.customerId);
+      // Provision access
       break;
     case "payment.failed":
-      notifyCustomer(event.data.customerId);
+      // Send custom notification
       break;
     case "entitlement.exhausted":
-      sendUpsellEmail(event.data.customerId);
+      // Upsell prompt
       break;
   }
 
@@ -473,121 +300,61 @@ app.post("/webhooks/cynco", express.raw({ type: "application/json" }), (req, res
 });
 ```
 
-### Next.js (App Router)
+Register a webhook endpoint:
 
 ```ts
-// app/api/webhooks/cynco/route.ts
-import { verifyWebhook } from "@cynco/pay/webhooks";
-
-export async function POST(req: Request) {
-  const body = await req.text();
-  const signature = req.headers.get("x-cynco-signature");
-  const event = verifyWebhook(body, signature, process.env.CYNCO_WEBHOOK_SECRET!);
-
-  // handle event.type ...
-
-  return Response.json({ received: true });
-}
+const webhook = await pay.createWebhook({
+  url: "https://yourapp.com/webhooks/cynco",
+  events: ["subscription.activated", "payment.failed"],
+});
+// Save webhook.secret — shown only once
 ```
-
-### Remix
-
-```ts
-// app/routes/webhooks.cynco.tsx
-import { verifyWebhook } from "@cynco/pay/webhooks";
-import type { ActionFunctionArgs } from "@remix-run/node";
-
-export async function action({ request }: ActionFunctionArgs) {
-  const body = await request.text();
-  const signature = request.headers.get("x-cynco-signature");
-  const event = verifyWebhook(body, signature, process.env.CYNCO_WEBHOOK_SECRET!);
-
-  // handle event.type ...
-
-  return Response.json({ received: true });
-}
-```
-
-<details>
-<summary>All webhook event types</summary>
-
-| Event | Fired when |
-|---|---|
-| `subscription.created` | Subscription record created |
-| `subscription.activated` | First payment succeeds or trial starts |
-| `subscription.renewed` | Recurring payment succeeds |
-| `subscription.upgraded` | Customer moved to a higher plan |
-| `subscription.downgraded` | Customer moved to a lower plan |
-| `subscription.canceled` | Subscription canceled |
-| `subscription.expired` | Subscription reached end of term |
-| `subscription.paused` | Subscription paused |
-| `subscription.resumed` | Subscription resumed from pause |
-| `payment.succeeded` | Payment collected successfully |
-| `payment.failed` | Payment attempt failed |
-| `payment.refunded` | Payment refunded (full or partial) |
-| `invoice.created` | Invoice generated |
-| `invoice.paid` | Invoice marked paid |
-| `entitlement.exhausted` | Metered feature balance reached zero |
-
-</details>
 
 ---
 
-## Customers
+## React
 
-```ts
-// Idempotent get-or-create -- safe to call on every login
-const customer = await pay.getOrCreateCustomer({
-  customerId: "user_123",
-  name: "Jane Doe",
-  email: "jane@example.com",
-});
+```tsx
+import { CyncoPayProvider, useCyncoPay, useBalance, useSubscriptions, useEntity } from "@cynco/pay/react";
 
-// Returns subscriptions, balances, flags, payment methods
-customer.subscriptions;
-customer.balances.api_calls.remaining;
-customer.flags.sso;
-```
+function App() {
+  return (
+    <CyncoPayProvider publishableKey="cp_pk_..." customerId="user_123">
+      <Dashboard />
+    </CyncoPayProvider>
+  );
+}
 
-```ts
-// Read
-const customer = await pay.getCustomer("user_123");
+function Dashboard() {
+  const { check, subscribe, track } = useCyncoPay();
+  const { balance, granted, usage } = useBalance("api_calls");
+  const { subscriptions } = useSubscriptions();
 
-// Update
-await pay.updateCustomer({ customerId: "user_123", name: "Jane Smith" });
+  return (
+    <div>
+      <p>{usage} / {granted} API calls used</p>
+      <button onClick={() => subscribe("pro", { successUrl: "/thanks" })}>
+        Upgrade to Pro
+      </button>
+    </div>
+  );
+}
 
-// Delete
-await pay.deleteCustomer("user_123");
-
-// List all
-const customers = await pay.listCustomers();
-```
-
-### Standalone Balances
-
-Grant promotional credits or rewards outside of a subscription.
-
-```ts
-await pay.createBalance({
-  customer: "user_123",
-  feature: "credits",
-  grantedBalance: 500,
-  resetInterval: "one_off",  // "month" | "year" | "one_off"
-});
-
-// Manually set usage or balance
-await pay.updateBalance({ customer: "user_123", feature: "credits", balance: 250 });
+function WorkspaceView({ entityId }: { entityId: string }) {
+  const { check, track } = useEntity(entityId);
+  // Entity-scoped operations
+}
 ```
 
 ---
 
 ## Billing Portal
 
-Generate a self-service portal URL. Customers manage subscriptions, update payment methods, and view invoices.
+Generate a self-service portal URL for customers to manage subscriptions and update payment methods:
 
 ```ts
 const { url } = await pay.portal("user_123");
-// Redirect -- signed URL, 1-hour TTL
+// Redirect customer to url — signed, 1-hour TTL
 ```
 
 ---
@@ -595,33 +362,84 @@ const { url } = await pay.portal("user_123");
 ## Analytics
 
 ```ts
-// MRR, ARR, churn rate, ARPU, trial conversion
+// MRR, ARR, churn, ARPU, trial conversion
 const metrics = await pay.analytics();
 
-// Monthly revenue timeline for charts
+// Revenue timeline for charts
 const timeline = await pay.revenueTimeline(12);
 
-// Per-customer usage aggregation
-const events = await pay.aggregateEvents("user_123", "api_calls", {
-  range: "30d",   // "7d" | "14d" | "30d" | "90d" | "365d"
-  groupBy: "day", // "day" | "week" | "month"
+// Usage events over time (pass to Recharts)
+const events = await pay.aggregateEvents("user_123", "api_calls", { range: "30d", groupBy: "day" });
+```
+
+---
+
+## Coupons
+
+```ts
+// Create a coupon
+const coupon = await pay.createCoupon({
+  code: "SAVE20",
+  type: "percentage",     // "percentage" | "fixed" | "trial_extension"
+  value: 20,              // 20% off
+  duration: "repeating",  // "once" | "repeating" | "forever"
+  durationMonths: 3,      // applies for 3 billing cycles
+  maxRedemptions: 100,
 });
 
-// events.timeline -> [{ period: "2026-03-01", count: 142, total: 142 }, ...]
-// events.total    -> { count: 4260, sum: 4260 }
+// Validate at checkout (safe with publishable key)
+const { valid, discountAmount, finalAmount } = await pay.validateCoupon({
+  code: "SAVE20",
+  customer: "user_123",
+  product: "pro",
+  amount: 2000,
+});
+// → { valid: true, discountAmount: 400, finalAmount: 1600 }
+
+// Update or archive
+await pay.updateCoupon("pcpn_1", { name: "Summer Sale" });
+await pay.archiveCoupon("pcpn_1");
+```
+
+---
+
+## API Keys
+
+```ts
+// Create (raw key shown only once — store securely)
+const { rawKey } = await pay.createApiKey({ name: "Production", type: "secret" });
+
+// List (masked) and revoke
+const keys = await pay.listApiKeys();
+await pay.revokeApiKey("pak_1");
+```
+
+---
+
+## Idempotency
+
+All billing-mutating endpoints support safe retries via the `Idempotency-Key` header:
+
+```ts
+await pay.subscribe(
+  { customer: "user_123", product: "pro", successUrl: "..." },
+  { idempotencyKey: "checkout_abc123" },
+);
+
+await pay.cancel("user_123", { product: "pro" }, { idempotencyKey: "cancel_abc123" });
 ```
 
 ---
 
 ## Product Versioning
 
-When you update a product, existing subscribers stay grandfathered on their version.
+When you update a product, existing subscribers stay grandfathered on their version:
 
 ```ts
 // List versions
 const { versions } = await pay.listProductVersions("pprod_xxx");
 
-// Migrate customers from an old version to the latest
+// Migrate customers to latest
 await pay.migrateCustomers("pprod_xxx", "pver_old_version_id");
 ```
 
@@ -629,34 +447,31 @@ await pay.migrateCustomers("pprod_xxx", "pver_old_version_id");
 
 ## Error Handling
 
-Every error is a typed `CyncoPayError` with machine-readable `code`, HTTP `status`, and optional field-level `details`.
-
 ```ts
 import { CyncoPayError } from "@cynco/pay";
 
 try {
-  await pay.subscribe({ customer: "user_123", product: "pro", successUrl: "..." });
+  await pay.subscribe({ ... });
 } catch (err) {
   if (err instanceof CyncoPayError) {
-    err.code;    // "VALIDATION_ERROR" | "NOT_FOUND" | "RATE_LIMITED" | ...
-    err.status;  // 422
-    err.details; // [{ field: "customer", message: "required" }]
+    console.log(err.code);    // "VALIDATION_ERROR"
+    console.log(err.status);  // 422
+    console.log(err.details); // [{ field: "customer", message: "required" }]
   }
 }
 ```
 
 ### Required Actions
 
-When a payment requires additional steps (3D Secure, card declined):
+When a payment can't be processed automatically (3DS, card declined):
 
 ```ts
-const result = await pay.subscribe({ /* ... */ });
+const result = await pay.subscribe({ ... });
 
 if (result.requiredAction) {
-  // result.requiredAction.code   -> "payment_failed" | "3ds_required"
-  // result.requiredAction.reason -> "Card was declined"
+  console.log(result.requiredAction.code);   // "payment_failed" | "3ds_required"
+  console.log(result.requiredAction.reason); // "Card was declined"
   // Redirect to result.url for the customer to resolve
-  redirect(result.url);
 }
 ```
 
@@ -667,122 +482,123 @@ if (result.requiredAction) {
 ### Core
 
 | Method | Description |
-|---|---|
+|--------|-------------|
 | `subscribe(input)` | Subscribe, upgrade, or downgrade a customer |
-| `check(customer, feature, options?)` | Check feature access. `sendEvent: true` for atomic deduct. `lock` for balance reservation. |
+| `check(customer, feature, options?)` | Check feature access (with optional atomic deduct or lock) |
 | `track(customer, feature, options?)` | Record usage for a metered feature |
-| `cancel(customer, options?)` | Cancel a subscription (`immediate`, `reason`) |
-| `finalizeLock({ lockId, action, overrideValue? })` | Confirm, release, or adjust a balance lock |
+| `cancel(customer, options?)` | Cancel a subscription |
+| `finalizeLock(input)` | Confirm, release, or adjust a balance lock |
 
 ### Customers
 
 | Method | Description |
-|---|---|
-| `getOrCreateCustomer({ customerId, name?, email? })` | Idempotent get-or-create |
+|--------|-------------|
+| `getOrCreateCustomer(input)` | Idempotent get-or-create |
 | `getCustomer(id)` | Get customer with subscriptions, balances, flags |
-| `updateCustomer({ customerId, name?, email? })` | Update customer info |
+| `updateCustomer(input)` | Update name/email |
 | `deleteCustomer(id)` | Delete customer mapping |
 | `listCustomers()` | List all customers |
 
-### Products and Plans
+### Products & Plans
 
 | Method | Description |
-|---|---|
+|--------|-------------|
 | `createProduct(input)` | Create product with prices and features |
 | `listProducts()` | List all products |
-| `listPlans(customer?)` | List plans with customer eligibility context |
-| `previewAttach(customer, product, priceId?)` | Preview charge before subscribing |
+| `listPlans(customer?)` | List plans with eligibility |
+| `previewAttach(customer, product)` | Preview charge before subscribing |
 
 ### Subscriptions
 
 | Method | Description |
-|---|---|
-| `updateSubscription(input)` | Cancel, uncancel, or change feature quantities |
-| `previewUpdate(input)` | Preview what a subscription update would charge |
-| `listSubscriptions(status?)` | List subscriptions, optionally filtered by status |
+|--------|-------------|
+| `updateSubscription(input, options?)` | Cancel, uncancel, pause, resume, or change quantities |
+| `previewUpdate(input)` | Preview subscription changes |
+| `listSubscriptions(status?, params?)` | List subscriptions |
 
-### Balances and Entities
+### Balances & Entities
 
 | Method | Description |
-|---|---|
+|--------|-------------|
 | `createBalance(input)` | Grant standalone credits |
 | `updateBalance(input)` | Set usage or balance directly |
-| `createEntity(input)` | Create entity (seat, workspace) under a customer |
-| `deleteEntity(customer, entityId)` | Remove entity (auto-decrements seat count) |
-| `listEntities(customer)` | List entities for a customer |
+| `createEntity(input)` | Create entity (seat/workspace) |
+| `deleteEntity(customer, entityId)` | Remove entity |
+| `listEntities(customer, params?)` | List entities |
 
-### Billing and Analytics
+### Billing
 
 | Method | Description |
-|---|---|
-| `portal(customer)` | Generate self-service billing portal URL (1-hour TTL) |
-| `analytics()` | MRR, ARR, churn, ARPU, trial conversion |
+|--------|-------------|
+| `portal(customer)` | Generate billing portal URL |
+| `analytics()` | MRR, ARR, churn, ARPU |
 | `revenueTimeline(months?)` | Monthly revenue chart data |
-| `aggregateEvents(customer, feature, options?)` | Usage timeline with grouping |
+| `aggregateEvents(customer, feature, options?)` | Usage timeline |
+| `getPricingTable(customer?)` | Embeddable pricing table with formatted prices |
 
 ### Webhooks
 
 | Method | Description |
-|---|---|
-| `createWebhook({ url, events? })` | Register endpoint (returns signing secret once) |
-| `listWebhooks()` | List endpoints (secrets redacted) |
+|--------|-------------|
+| `createWebhook(input)` | Register endpoint |
+| `listWebhooks(params?)` | List endpoints |
 | `deleteWebhook(id)` | Remove endpoint |
-| `verifyWebhook(body, signature, secret)` | Verify and parse incoming webhook (from `@cynco/pay/webhooks`) |
 
-### Product Versioning
+### Coupons
 
 | Method | Description |
-|---|---|
-| `listProductVersions(productId)` | List version history (grandfathering) |
-| `migrateCustomers(productId, versionId)` | Migrate subscribers to latest version |
+|--------|-------------|
+| `createCoupon(input)` | Create a discount coupon |
+| `listCoupons(params?)` | List all coupons |
+| `getCoupon(id)` | Get coupon by ID |
+| `updateCoupon(id, input)` | Update coupon properties |
+| `archiveCoupon(id)` | Soft-delete a coupon |
+| `validateCoupon(input)` | Validate a code for a customer + product |
+
+### Spend Caps
+
+| Method | Description |
+|--------|-------------|
+| `getSpendCap(customer, feature)` | Get spend cap status |
+| `setSpendCap(input)` | Set or remove a customer spend cap |
+| `setProductSpendCap(input)` | Set default cap for a product |
+
+### API Keys
+
+| Method | Description |
+|--------|-------------|
+| `createApiKey(input)` | Create a new API key (raw key shown once) |
+| `listApiKeys(params?)` | List API keys (masked) |
+| `revokeApiKey(id)` | Revoke an API key |
+
+### Rewards & Referrals
+
+| Method | Description |
+|--------|-------------|
+| `createRewardProgram(input)` | Create a referral/reward program |
+| `listRewardPrograms()` | List all programs |
+| `createReferralCode(input)` | Create a referral code for a customer |
+| `listReferralCodes(customer)` | List referral codes |
+| `redeemReferralCode(input)` | Redeem a referral code |
+
+### Audit & Versioning
+
+| Method | Description |
+|--------|-------------|
+| `listAuditEvents(filters?)` | List billing audit trail |
+| `listProductVersions(productId)` | List version history |
+| `migrateCustomers(productId, versionId)` | Migrate to latest |
 
 ---
 
-## Architecture
+## What Makes Cynco Pay Different
 
-```
-Your App
-  |
-  |  @cynco/pay (this SDK)
-  |
-  v
-Cynco Pay API
-  |
-  |--- Entitlement Engine    check / track / lock
-  |--- Subscription Engine   subscribe / cancel / upgrade
-  |--- Payment Gateway       CHIP (Malaysia) + Stripe
-  |--- General Ledger        DR 1200 Receivable / CR 4001 Revenue
-  |
-  v
-Cynco Dashboard              analytics, customer management, webhook logs
-```
-
-**What this means for you:**
-
-- **No Stripe/CHIP keys.** We handle the payment gateway. You get one key: `cp_sk_...`.
-- **No accounting sync.** Every charge creates journal entries automatically. DR Receivable, CR Revenue. Refunds reverse them.
-- **No Redis.** Postgres advisory locks handle concurrency. Balance locking is built into the database layer.
-- **No race conditions.** Per-customer locking serializes all billing operations. Atomic check+deduct prevents double-spending.
-- **Idempotent by default.** `Idempotency-Key` header on all billing endpoints. Safe to retry.
-
----
-
-## Configuration
-
-```ts
-const pay = new CyncoPay({
-  key: "cp_sk_...",           // required -- secret key (server) or publishable key (client)
-  baseUrl: "https://...",     // optional -- defaults to https://app.cynco.io
-  timeout: 10_000,            // optional -- request timeout in ms, defaults to 10000
-});
-```
-
-| Key prefix | Use | Permissions |
-|---|---|---|
-| `cp_sk_...` | Server-side | Full access (subscribe, cancel, track, manage products) |
-| `cp_pk_...` | Client-side (React) | Read-only (check, list plans, view balance) |
-
----
+- **Accounting built in.** Every charge auto-posts to the general ledger (DR Receivable 1200, CR Revenue 4001). No reconciliation needed.
+- **Balance locking.** Reserve tokens before an AI completion, finalize with actual usage. Purpose-built for AI SaaS.
+- **CHIP + Stripe.** Malaysian payment gateway native. Not just a Stripe wrapper.
+- **Zero infrastructure.** No Redis, no queues, no external services. Postgres advisory locks for concurrency. All-in-one.
+- **Per-customer locking.** Billing operations are serialized per customer. No double-charges from race conditions.
+- **API idempotency.** `Idempotency-Key` header on all billing endpoints. Safe retries.
 
 ## License
 

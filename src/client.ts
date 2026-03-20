@@ -1,26 +1,50 @@
 import type {
   CyncoPayConfig,
+  RequestOptions,
+  PaginationParams,
   ApiResponse,
   SubscribeInput,
   SubscribeResult,
-  CheckInput,
   CheckResult,
-  TrackInput,
   TrackResult,
-  CancelInput,
   CancelResult,
   CreateProductInput,
   Product,
+  Plan,
+  CustomerState,
+  SubscriptionStatus,
+  UpdateSubscriptionInput,
+  UpdateSubscriptionResult,
+  PreviewResult,
+  CreateBalanceInput,
+  UpdateBalanceInput,
+  FinalizeLockInput,
+  FinalizeLockResult,
+  CreateEntityInput,
+  Entity,
+  SubscriptionSummary,
   CreateWebhookInput,
   WebhookEndpoint,
   CreateCouponInput,
-  ValidateCouponInput,
   UpdateCouponInput,
+  Coupon,
+  CouponValidation,
+  SpendCapStatus,
   SetSpendCapInput,
   SetProductSpendCapInput,
+  AuditEvent,
+  AnalyticsSummary,
+  RevenueTimelineEntry,
+  UsageAggregation,
+  CreateApiKeyInput,
+  ApiKey,
+  ApiKeyWithRawKey,
   CreateRewardProgramInput,
+  RewardProgram,
   CreateReferralCodeInput,
+  ReferralCode,
   RedeemReferralInput,
+  PricingTableResponse,
 } from "./types.js";
 
 const DEFAULT_BASE_URL = "https://app.cynco.io";
@@ -42,6 +66,7 @@ export class CyncoPay {
   private readonly key: string;
   private readonly baseUrl: string;
   private readonly timeout: number;
+  private readonly apiVersion: string | undefined;
 
   constructor(config: CyncoPayConfig) {
     if (!config.key) {
@@ -50,36 +75,30 @@ export class CyncoPay {
     this.key = config.key;
     this.baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeout = config.timeout ?? DEFAULT_TIMEOUT;
+    this.apiVersion = config.apiVersion;
   }
 
-  // ── Core API ─────────────────────────────────────────────────────────────
+  // ── Core ───────────────────────────────────────────────────────────────────
 
   /** Subscribe a customer to a product. Handles new, upgrade, downgrade, and re-subscribe. */
-  async subscribe(input: SubscribeInput): Promise<SubscribeResult> {
-    return this.post("/api/v1/pay/subscribe", input);
+  async subscribe(input: SubscribeInput, options?: RequestOptions): Promise<SubscribeResult> {
+    return this.post("/api/v1/pay/subscribe", input, options);
   }
 
   /**
    * Check if a customer has access to a feature.
-   * Pass `sendEvent: true` to atomically check AND deduct in one call (zero race conditions).
-   * Pass `lock` to reserve tokens with a balance lock (check-with-lock pattern).
+   *
+   * - Pass `sendEvent: true` to atomically check AND deduct in one call (zero race conditions).
+   * - Pass `lock` to reserve tokens with a balance lock (check-with-lock pattern).
+   * - Pass `entityId` for per-seat/per-workspace checks.
    */
   async check(customer: string, feature: string, options?: {
     sendEvent?: boolean;
     requiredBalance?: number;
     entityId?: string;
     lock?: { enabled: boolean; lockId?: string; expiresAt: number };
-  }): Promise<CheckResult & { lockId?: string | null }> {
+  }): Promise<CheckResult> {
     return this.post("/api/v1/pay/check", { customer, feature, ...options });
-  }
-
-  /** Finalize a balance lock — confirm usage, release the reservation, or adjust with an override. */
-  async finalizeLock(input: {
-    lockId: string;
-    action: "confirm" | "release";
-    overrideValue?: number;
-  }): Promise<{ success: boolean; adjusted: number }> {
-    return this.post("/api/v1/pay/balances/finalize", input);
   }
 
   /** Track usage for a metered feature. */
@@ -89,11 +108,7 @@ export class CyncoPay {
     idempotencyKey?: string;
     metadata?: Record<string, unknown>;
   }): Promise<TrackResult> {
-    return this.post("/api/v1/pay/track", {
-      customer,
-      feature,
-      ...options,
-    });
+    return this.post("/api/v1/pay/track", { customer, feature, ...options });
   }
 
   /** Cancel a customer's subscription. */
@@ -101,15 +116,20 @@ export class CyncoPay {
     product?: string;
     immediate?: boolean;
     reason?: string;
-  }): Promise<CancelResult> {
-    return this.post("/api/v1/pay/cancel", { customer, ...options });
+  }, requestOptions?: RequestOptions): Promise<CancelResult> {
+    return this.post("/api/v1/pay/cancel", { customer, ...options }, requestOptions);
   }
 
-  // ── Products ─────────────────────────────────────────────────────────────
+  /** Finalize a balance lock — confirm usage, release the reservation, or adjust with an override. */
+  async finalizeLock(input: FinalizeLockInput): Promise<FinalizeLockResult> {
+    return this.post("/api/v1/pay/balances/finalize", input);
+  }
+
+  // ── Products ───────────────────────────────────────────────────────────────
 
   /** List all products. */
-  async listProducts(): Promise<Product[]> {
-    return this.get("/api/v1/pay/products");
+  async listProducts(params?: PaginationParams): Promise<Product[]> {
+    return this.get("/api/v1/pay/products", params);
   }
 
   /** Create a product with optional prices and features. */
@@ -117,7 +137,35 @@ export class CyncoPay {
     return this.post("/api/v1/pay/products", input);
   }
 
-  // ── Product Versions (grandfathering) ──────────────────────────────────
+  // ── Plans ──────────────────────────────────────────────────────────────────
+
+  /**
+   * List all plans. If a customer ID is provided, each plan includes
+   * `customerEligibility` (new, upgrade, downgrade, active, scheduled, canceled).
+   */
+  async listPlans(customer?: string, params?: PaginationParams): Promise<Plan[]> {
+    const query = this.buildQuery({ customer, ...params });
+    return this.get(`/api/v1/pay/plans${query}`);
+  }
+
+  /**
+   * Preview what would happen if a customer subscribes to a plan.
+   * No charges are made. Returns scenario, amount due, proration, trial info.
+   */
+  async previewAttach(customer: string, product: string, priceId?: string): Promise<PreviewResult> {
+    return this.post("/api/v1/pay/preview", { customer, product, priceId });
+  }
+
+  /**
+   * Get the embeddable pricing table with pre-formatted prices and plan groups.
+   * Safe to call with a publishable key.
+   */
+  async getPricingTable(customer?: string): Promise<PricingTableResponse> {
+    const query = this.buildQuery({ customer });
+    return this.get(`/api/v1/pay/components/pricing-table${query}`);
+  }
+
+  // ── Product Versions ───────────────────────────────────────────────────────
 
   /** List product versions (for grandfathering). */
   async listProductVersions(productId: string): Promise<Record<string, unknown>> {
@@ -129,50 +177,113 @@ export class CyncoPay {
     return this.post("/api/v1/pay/products/versions", { productId, versionId });
   }
 
-  // ── Plans ───────────────────────────────────────────────────────────────
+  // ── Customers ──────────────────────────────────────────────────────────────
 
   /**
-   * List all plans. If a customer ID is provided, each plan includes
-   * `customerEligibility` (new, upgrade, downgrade, active, scheduled, canceled).
+   * Idempotent get-or-create customer. Returns full state with subscriptions, balances, payment methods.
+   * Safe to call on every login/signup.
    */
-  async listPlans(customer?: string): Promise<unknown[]> {
-    const query = customer ? `?customer=${encodeURIComponent(customer)}` : "";
-    return this.get(`/api/v1/pay/plans${query}`);
+  async getOrCreateCustomer(input: {
+    customerId: string;
+    name?: string;
+    email?: string;
+  }): Promise<CustomerState> {
+    return this.post("/api/v1/pay/customers", input);
   }
 
-  /**
-   * Preview what would happen if a customer subscribes to a plan.
-   * No charges are made. Returns scenario, amount due, proration, trial info.
-   */
-  async previewAttach(customer: string, product: string, priceId?: string): Promise<Record<string, unknown>> {
-    return this.post("/api/v1/pay/preview", { customer, product, priceId });
+  /** Get a customer by external ID. Returns subscriptions, balances, payment methods. */
+  async getCustomer(externalId: string): Promise<CustomerState> {
+    return this.get(`/api/v1/pay/customers?id=${encodeURIComponent(externalId)}`);
   }
 
-  // ── Subscription Updates ─────────────────────────────────────────────────
-
-  /** Update a subscription — change quantities, cancel, or uncancel. */
-  async updateSubscription(input: {
-    customer: string;
-    product: string;
-    cancelAction?: "cancel_end_of_cycle" | "cancel_immediately" | "uncancel";
-    featureQuantities?: { featureId: string; quantity: number }[];
-    prorationBehavior?: "prorate" | "none";
-  }): Promise<Record<string, unknown>> {
-    return this.post("/api/v1/pay/subscriptions/update", input);
+  /** List all customers. */
+  async listCustomers(params?: PaginationParams): Promise<CustomerState[]> {
+    return this.get("/api/v1/pay/customers", params);
   }
 
-  /** Preview what a subscription update would charge. */
-  async previewUpdate(input: {
-    customer: string;
-    product: string;
-    cancelAction?: "cancel_end_of_cycle" | "cancel_immediately" | "uncancel";
-    featureQuantities?: { featureId: string; quantity: number }[];
-    prorationBehavior?: "prorate" | "none";
-  }): Promise<Record<string, unknown>> {
+  /** Update customer properties (name, email). */
+  async updateCustomer(input: {
+    customerId: string;
+    name?: string;
+    email?: string;
+  }): Promise<CustomerState> {
+    return this.request("PUT", "/api/v1/pay/customers", input);
+  }
+
+  /** Delete a customer mapping by external ID. */
+  async deleteCustomer(customerId: string): Promise<{ deleted: true }> {
+    return this.request("DELETE", `/api/v1/pay/customers?id=${encodeURIComponent(customerId)}`);
+  }
+
+  // ── Subscriptions ──────────────────────────────────────────────────────────
+
+  /** List subscriptions, optionally filtered by comma-separated status values. */
+  async listSubscriptions(status?: SubscriptionStatus | (string & {}), params?: PaginationParams): Promise<SubscriptionSummary[]> {
+    const query = this.buildQuery({ status, ...params });
+    return this.get(`/api/v1/pay/subscriptions${query}`);
+  }
+
+  /** Update a subscription — change seat quantity, cancel, uncancel, pause, or resume. */
+  async updateSubscription(input: UpdateSubscriptionInput, options?: RequestOptions): Promise<UpdateSubscriptionResult> {
+    return this.post("/api/v1/pay/subscriptions/update", input, options);
+  }
+
+  /** Preview what a subscription update would charge. No charges are made. */
+  async previewUpdate(input: UpdateSubscriptionInput): Promise<UpdateSubscriptionResult> {
     return this.post("/api/v1/pay/subscriptions/preview-update", input);
   }
 
-  // ── Events ─────────────────────────────────────────────────────────────
+  // ── Balances ───────────────────────────────────────────────────────────────
+
+  /** Create a standalone balance (promotional credits, rewards). */
+  async createBalance(input: CreateBalanceInput): Promise<Record<string, unknown>> {
+    return this.post("/api/v1/pay/balances/create", input);
+  }
+
+  /** Set usage directly or update balance for a feature. Exactly one of `usage` or `balance` must be set. */
+  async updateBalance(input: UpdateBalanceInput): Promise<Record<string, unknown>> {
+    return this.post("/api/v1/pay/balances/update", input);
+  }
+
+  // ── Entities ───────────────────────────────────────────────────────────────
+
+  /** Create an entity (seat, workspace, project) under a customer. Auto-increments the feature count. */
+  async createEntity(input: CreateEntityInput): Promise<Entity> {
+    return this.post("/api/v1/pay/entities", input);
+  }
+
+  /** List entities for a customer. */
+  async listEntities(customer: string, params?: PaginationParams): Promise<Entity[]> {
+    const query = this.buildQuery({ customer, ...params });
+    return this.get(`/api/v1/pay/entities${query}`);
+  }
+
+  /** Delete an entity. Auto-decrements the feature count. */
+  async deleteEntity(customer: string, entityId: string): Promise<Record<string, unknown>> {
+    return this.request("DELETE", "/api/v1/pay/entities", { customer, entityId });
+  }
+
+  // ── Portal ─────────────────────────────────────────────────────────────────
+
+  /** Generate a customer billing portal URL (signed, 1-hour TTL). */
+  async portal(customer: string): Promise<{ url: string }> {
+    return this.get(`/api/v1/pay/portal?customer=${encodeURIComponent(customer)}`);
+  }
+
+  // ── Analytics ──────────────────────────────────────────────────────────────
+
+  /** Get billing analytics (MRR, ARR, churn, ARPU, trial conversion). */
+  async analytics(): Promise<AnalyticsSummary> {
+    return this.get("/api/v1/pay/analytics");
+  }
+
+  /** Get monthly revenue timeline for charts. */
+  async revenueTimeline(months?: number): Promise<RevenueTimelineEntry[]> {
+    const query = this.buildQuery({ view: "timeline", months });
+    return this.get(`/api/v1/pay/analytics${query}`);
+  }
+
+  // ── Usage Events ───────────────────────────────────────────────────────────
 
   /**
    * Aggregate usage events over time. Returns a timeline + totals.
@@ -181,233 +292,194 @@ export class CyncoPay {
   async aggregateEvents(customer: string, feature: string, options?: {
     range?: "7d" | "14d" | "30d" | "90d" | "365d";
     groupBy?: "day" | "week" | "month";
-  }): Promise<{ timeline: { period: string; count: number; total: number }[]; total: { count: number; sum: number } }> {
+  }): Promise<UsageAggregation> {
     return this.post("/api/v1/pay/events", { customer, feature, ...options });
   }
 
-  // ── Customers ────────────────────────────────────────────────────────────
+  // ── Webhooks ───────────────────────────────────────────────────────────────
 
-  /**
-   * Idempotent get-or-create customer. Returns full state with subscriptions, balances, payment methods.
-   * Call on every login/signup — safe to call repeatedly.
-   */
-  async getOrCreateCustomer(input: {
-    customerId: string;
-    name?: string;
-    email?: string;
-  }): Promise<Record<string, unknown>> {
-    return this.post("/api/v1/pay/customers", input);
-  }
-
-  /** Get a customer by external ID. Returns subscriptions, balances, payment methods. */
-  async getCustomer(externalId: string): Promise<Record<string, unknown>> {
-    return this.get(`/api/v1/pay/customers?id=${encodeURIComponent(externalId)}`);
-  }
-
-  /** List all customers. */
-  async listCustomers(): Promise<Record<string, unknown>[]> {
-    return this.get("/api/v1/pay/customers");
-  }
-
-  /** Update customer properties (name, email). */
-  async updateCustomer(input: {
-    customerId: string;
-    name?: string;
-    email?: string;
-  }): Promise<Record<string, unknown>> {
-    return this.request("PUT", "/api/v1/pay/customers", input);
-  }
-
-  /** Delete a customer mapping by external ID. */
-  async deleteCustomer(customerId: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/pay/customers?id=${encodeURIComponent(customerId)}`);
-  }
-
-  // ── Balances ──────────────────────────────────────────────────────────────
-
-  /** Create a standalone balance (promotional credits, rewards). */
-  async createBalance(input: {
-    customer: string;
-    feature: string;
-    grantedBalance: number;
-    resetInterval?: "month" | "year" | "one_off";
-  }): Promise<Record<string, unknown>> {
-    return this.post("/api/v1/pay/balances/create", input);
-  }
-
-  /** Set usage directly or update balance for a feature. */
-  async updateBalance(input: {
-    customer: string;
-    feature: string;
-    usage?: number;
-    balance?: number;
-  }): Promise<Record<string, unknown>> {
-    return this.post("/api/v1/pay/balances/update", input);
-  }
-
-  // ── Entities ────────────────────────────────────────────────────────────
-
-  /** Create an entity (user, workspace, seat) under a customer. Auto-increments seat count. */
-  async createEntity(input: {
-    customer: string;
-    entityId: string;
-    featureId: string;
-    name?: string;
-    metadata?: Record<string, unknown>;
-  }): Promise<Record<string, unknown>> {
-    return this.post("/api/v1/pay/entities", input);
-  }
-
-  /** List entities for a customer. */
-  async listEntities(customer: string): Promise<Record<string, unknown>[]> {
-    return this.get(`/api/v1/pay/entities?customer=${encodeURIComponent(customer)}`);
-  }
-
-  /** Delete an entity. Auto-decrements seat count. */
-  async deleteEntity(customer: string, entityId: string): Promise<Record<string, unknown>> {
-    return this.request("DELETE", "/api/v1/pay/entities", { customer, entityId });
-  }
-
-  // ── Subscriptions ────────────────────────────────────────────────────────
-
-  /** List subscriptions, optionally filtered by status. */
-  async listSubscriptions(status?: string): Promise<Record<string, unknown>[]> {
-    const query = status ? `?status=${encodeURIComponent(status)}` : "";
-    return this.get(`/api/v1/pay/subscriptions${query}`);
-  }
-
-  // ── Portal ──────────────────────────────────────────────────────────────
-
-  /** Generate a customer billing portal URL (1-hour TTL). */
-  async portal(customer: string): Promise<{ url: string }> {
-    return this.get(`/api/v1/pay/portal?customer=${encodeURIComponent(customer)}`);
-  }
-
-  // ── Analytics ──────────────────────────────────────────────────────────
-
-  /** Get billing analytics (MRR, ARR, churn, ARPU, trial conversion). */
-  async analytics(): Promise<Record<string, unknown>> {
-    return this.get("/api/v1/pay/analytics");
-  }
-
-  /** Get monthly revenue timeline. */
-  async revenueTimeline(months?: number): Promise<Record<string, unknown>[]> {
-    const query = months ? `?view=timeline&months=${months}` : "?view=timeline";
-    return this.get(`/api/v1/pay/analytics${query}`);
-  }
-
-  // ── Webhooks ─────────────────────────────────────────────────────────────
-
-  /** Register a webhook endpoint. Returns the signing secret once. */
+  /** Register a webhook endpoint. Returns the signing secret once — store it securely. */
   async createWebhook(input: CreateWebhookInput): Promise<WebhookEndpoint> {
     return this.post("/api/v1/pay/webhooks", input);
   }
 
   /** List webhook endpoints (secrets are redacted). */
-  async listWebhooks(): Promise<WebhookEndpoint[]> {
-    return this.get("/api/v1/pay/webhooks");
+  async listWebhooks(params?: PaginationParams): Promise<WebhookEndpoint[]> {
+    return this.get("/api/v1/pay/webhooks", params);
   }
 
   /** Delete a webhook endpoint. */
-  async deleteWebhook(id: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/pay/webhooks?id=${encodeURIComponent(id)}`);
+  async deleteWebhook(id: string): Promise<{ deleted: true }> {
+    return this.request("DELETE", `/api/v1/pay/webhooks?id=${encodeURIComponent(id)}`);
   }
 
-  // ── Coupons ──────────────────────────────────────────────────────────────
-
-  /** List all coupons. Supports pagination via query params. */
-  async listCoupons(): Promise<Record<string, unknown>[]> {
-    return this.get("/api/v1/pay/coupons");
-  }
+  // ── Coupons ────────────────────────────────────────────────────────────────
 
   /** Create a coupon. */
-  async createCoupon(input: CreateCouponInput): Promise<Record<string, unknown>> {
+  async createCoupon(input: CreateCouponInput): Promise<Coupon> {
     return this.post("/api/v1/pay/coupons", input);
   }
 
+  /** List all coupons. */
+  async listCoupons(params?: PaginationParams): Promise<Coupon[]> {
+    return this.get("/api/v1/pay/coupons", params);
+  }
+
   /** Get a coupon by ID. */
-  async getCoupon(id: string): Promise<Record<string, unknown>> {
+  async getCoupon(id: string): Promise<Coupon> {
     return this.get(`/api/v1/pay/coupons/${encodeURIComponent(id)}`);
   }
 
-  /** Update a coupon by ID. */
-  async updateCoupon(id: string, input: UpdateCouponInput): Promise<Record<string, unknown>> {
+  /** Update a coupon (name, status, limits, expiry). */
+  async updateCoupon(id: string, input: UpdateCouponInput): Promise<Coupon> {
     return this.request("PATCH", `/api/v1/pay/coupons/${encodeURIComponent(id)}`, input);
   }
 
-  /** Archive a coupon by ID (shorthand for updateCoupon with status: "archived"). */
-  async archiveCoupon(id: string): Promise<Record<string, unknown>> {
-    return this.request("PATCH", `/api/v1/pay/coupons/${encodeURIComponent(id)}`, { status: "archived" });
+  /** Archive a coupon (soft-delete). */
+  async archiveCoupon(id: string): Promise<{ archived: true }> {
+    return this.request("DELETE", `/api/v1/pay/coupons/${encodeURIComponent(id)}`);
   }
 
-  /**
-   * Validate a coupon code without redeeming it.
-   * Safe to call from client-side (supports publishable keys).
-   */
-  async validateCoupon(input: ValidateCouponInput): Promise<{ valid: boolean; discount?: Record<string, unknown> }> {
+  /** Validate a coupon code for a customer + product. Safe with publishable key. */
+  async validateCoupon(input: {
+    code: string;
+    customer: string;
+    product: string;
+    /** Order amount in minor units for minimum-amount checks. */
+    amount: number;
+  }): Promise<CouponValidation> {
     return this.post("/api/v1/pay/coupons/validate", input);
   }
 
-  // ── Spend Caps ──────────────────────────────────────────────────────────
+  // ── Spend Caps ─────────────────────────────────────────────────────────────
 
-  /** Get spend cap status for a customer's feature. */
-  async getSpendCap(customer: string, feature: string): Promise<Record<string, unknown>> {
-    return this.get(`/api/v1/pay/spend-caps?customer=${encodeURIComponent(customer)}&feature=${encodeURIComponent(feature)}`);
+  /** Get spend cap status for a customer + feature. */
+  async getSpendCap(customer: string, feature: string): Promise<SpendCapStatus> {
+    const query = this.buildQuery({ customer, feature });
+    return this.get(`/api/v1/pay/spend-caps${query}`);
   }
 
-  /** Set a spend cap on a customer's feature. Pass capCents: null to remove. */
-  async setSpendCap(input: SetSpendCapInput): Promise<Record<string, unknown>> {
+  /** Set a spend cap for a customer + feature. Pass `capCents: null` to remove. */
+  async setSpendCap(input: SetSpendCapInput): Promise<SpendCapStatus> {
     return this.post("/api/v1/pay/spend-caps", input);
   }
 
-  /** Set a product-level default spend cap for a feature. */
+  /** Set a default spend cap for all customers on a product + feature. */
   async setProductSpendCap(input: Omit<SetProductSpendCapInput, "scope">): Promise<Record<string, unknown>> {
-    return this.post("/api/v1/pay/spend-caps", { ...input, scope: "product" });
+    return this.post("/api/v1/pay/spend-caps", { scope: "product", ...input });
   }
 
-  // ── Rewards ─────────────────────────────────────────────────────────────
+  // ── Audit Log ──────────────────────────────────────────────────────────────
 
-  /** List reward programs. */
-  async listRewardPrograms(): Promise<Record<string, unknown>[]> {
-    return this.get("/api/v1/pay/rewards");
+  /** List audit events. Filter by subscription, customer, or event type. */
+  async listAuditEvents(filters?: {
+    subscriptionId?: string;
+    customerMapId?: string;
+    event?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<AuditEvent[]> {
+    const query = this.buildQuery({
+      subscription: filters?.subscriptionId,
+      customer_map_id: filters?.customerMapId,
+      event: filters?.event,
+      limit: filters?.limit,
+      offset: filters?.offset,
+    });
+    return this.get(`/api/v1/pay/audit${query}`);
   }
 
-  /** List referral codes for a customer. */
-  async listReferralCodes(customer: string): Promise<Record<string, unknown>[]> {
-    return this.get(`/api/v1/pay/rewards?customer=${encodeURIComponent(customer)}`);
+  // ── API Keys ───────────────────────────────────────────────────────────────
+
+  /** Create an API key. The raw key is returned once — store it securely. */
+  async createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWithRawKey> {
+    return this.post("/api/v1/pay/api-keys", input);
   }
+
+  /** List API keys (raw key values are not included). */
+  async listApiKeys(params?: PaginationParams): Promise<ApiKey[]> {
+    return this.get("/api/v1/pay/api-keys", params);
+  }
+
+  /** Revoke an API key. */
+  async revokeApiKey(id: string): Promise<{ revoked: true }> {
+    return this.request("DELETE", `/api/v1/pay/api-keys?id=${encodeURIComponent(id)}`);
+  }
+
+  // ── Rewards ────────────────────────────────────────────────────────────────
 
   /** Create a reward program. */
-  async createRewardProgram(input: CreateRewardProgramInput): Promise<Record<string, unknown>> {
+  async createRewardProgram(input: CreateRewardProgramInput): Promise<RewardProgram> {
     return this.post("/api/v1/pay/rewards", input);
   }
 
-  /** Create a referral code for a customer under a reward program. */
-  async createReferralCode(input: CreateReferralCodeInput): Promise<Record<string, unknown>> {
+  /** List all reward programs. */
+  async listRewardPrograms(): Promise<RewardProgram[]> {
+    return this.get("/api/v1/pay/rewards");
+  }
+
+  /** Create a referral code for a customer. */
+  async createReferralCode(input: CreateReferralCodeInput): Promise<ReferralCode> {
     return this.post("/api/v1/pay/rewards?action=code", input);
   }
 
-  /** Redeem a referral code. Atomically validates limits and applies the reward. */
+  /** List referral codes for a customer. */
+  async listReferralCodes(customer: string): Promise<ReferralCode[]> {
+    return this.get(`/api/v1/pay/rewards?customer=${encodeURIComponent(customer)}`);
+  }
+
+  /** Redeem a referral code. Atomic — rewards both referrer and referee. */
   async redeemReferralCode(input: RedeemReferralInput): Promise<Record<string, unknown>> {
     return this.post("/api/v1/pay/rewards?action=redeem", input);
   }
 
-  // ── HTTP Layer ───────────────────────────────────────────────────────────
+  // ── HTTP Layer ─────────────────────────────────────────────────────────────
 
-  private async get<T>(path: string): Promise<T> {
+  private buildQuery(params?: Record<string, string | number | undefined>): string {
+    if (!params) return "";
+    const entries = Object.entries(params).filter(
+      (entry): entry is [string, string | number] => entry[1] !== undefined,
+    );
+    if (entries.length === 0) return "";
+    const qs = new URLSearchParams(entries.map(([k, v]) => [k, String(v)]));
+    return `?${qs.toString()}`;
+  }
+
+  private async get<T>(path: string, params?: PaginationParams): Promise<T> {
+    if (params) {
+      const query = this.buildQuery(params as Record<string, string | number | undefined>);
+      if (query) {
+        path = path.includes("?")
+          ? `${path}&${query.slice(1)}`
+          : `${path}${query}`;
+      }
+    }
     return this.request("GET", path);
   }
 
-  private async post<T>(path: string, body: unknown): Promise<T> {
-    return this.request("POST", path, body);
+  private async post<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
+    return this.request("POST", path, body, options);
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: RequestOptions,
+  ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.key}`,
       Accept: "application/json",
     };
+
+    if (this.apiVersion) {
+      headers["X-CyncoPay-Version"] = this.apiVersion;
+    }
+
+    if (options?.idempotencyKey) {
+      headers["Idempotency-Key"] = options.idempotencyKey;
+    }
 
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
@@ -427,8 +499,19 @@ export class CyncoPay {
       throw new CyncoPayError(message, code, response.status, errorBody?.error?.details);
     }
 
+    // Handle 204 No Content
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
     const json = await response.json() as ApiResponse<T>;
-    if (!json.success) {
+
+    // Some list endpoints return { data: [...], pagination: {...} } without success wrapper
+    if ("data" in json && !("success" in json)) {
+      return (json as { data: T }).data;
+    }
+
+    if (json.success === false) {
       throw new CyncoPayError(
         json.error?.message ?? "Unknown error",
         json.error?.code ?? "UNKNOWN",
@@ -440,7 +523,8 @@ export class CyncoPay {
     if (json.data === undefined) {
       throw new CyncoPayError("Empty response from server", "EMPTY_RESPONSE", response.status);
     }
-    return json.data as T;
+
+    return json.data;
   }
 }
 

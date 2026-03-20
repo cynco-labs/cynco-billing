@@ -14,6 +14,14 @@ import type {
   SubscribeResult,
   TrackResult,
   SubscribeInput,
+  PricingTableResponse,
+  PricingTablePlan,
+  CouponValidation,
+  Plan,
+  CustomerEligibility,
+  SubscriptionSummary,
+  UsageTimelineEntry,
+  UsageAggregation,
 } from "./types.js";
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -28,7 +36,7 @@ interface CyncoPayContextValue {
   /** Subscribe the current customer to a product. */
   subscribe: (
     product: string,
-    options?: { successUrl?: string; cancelUrl?: string; quantity?: number },
+    options?: Omit<SubscribeInput, "customer" | "product">,
   ) => Promise<SubscribeResult>;
 
   /** Check if the current customer has access to a feature. Reads from cache first. */
@@ -87,28 +95,42 @@ export function CyncoPayProvider({
     new Map(),
   );
   const pendingChecks = useRef(new Set<string>());
+  const entitlementsRef = useRef(entitlements);
+  useEffect(() => { entitlementsRef.current = entitlements; }, [entitlements]);
 
   // Stabilize prefetch array to avoid re-fetching on every render
   const prefetchKey = prefetch ? JSON.stringify(prefetch) : "";
 
-  // Resolve customer ID
+  // Resolve customer ID — reset entitlements when customer changes
   useEffect(() => {
     if (typeof customerIdProp === "string") {
-      setCustomerId(customerIdProp);
+      setCustomerId((prev) => {
+        if (prev !== customerIdProp) {
+          setEntitlements(new Map());
+          pendingChecks.current = new Set();
+        }
+        return customerIdProp;
+      });
       setLoading(false);
       return;
     }
     let cancelled = false;
     Promise.resolve(customerIdProp()).then((id) => {
       if (!cancelled) {
-        setCustomerId(id);
+        setCustomerId((prev) => {
+          if (prev !== id) {
+            setEntitlements(new Map());
+            pendingChecks.current = new Set();
+          }
+          return id;
+        });
         setLoading(false);
       }
     });
     return () => { cancelled = true; };
   }, [customerIdProp]);
 
-  // Prefetch entitlements
+  // Prefetch entitlements (merges into existing map)
   useEffect(() => {
     if (!customerId || !prefetch?.length) return;
     let cancelled = false;
@@ -121,7 +143,7 @@ export function CyncoPayProvider({
     )
       .then((results) => {
         if (cancelled) return;
-        setEntitlements(new Map(results));
+        setEntitlements((prev) => new Map([...prev, ...results]));
       })
       .catch((err) => {
         if (!cancelled && err instanceof CyncoPayError) setError(err);
@@ -134,7 +156,7 @@ export function CyncoPayProvider({
   const subscribe = useCallback(
     async (
       product: string,
-      options?: { successUrl?: string; cancelUrl?: string; quantity?: number },
+      options?: Omit<SubscribeInput, "customer" | "product">,
     ): Promise<SubscribeResult> => {
       if (!customerId) throw new Error("Customer not resolved yet");
       const result = await client.subscribe({
@@ -153,7 +175,7 @@ export function CyncoPayProvider({
 
   const check = useCallback(
     (feature: string): CheckResult => {
-      const cached = entitlements.get(feature);
+      const cached = entitlementsRef.current.get(feature);
       if (cached) return cached;
       // Not cached — return denied, trigger async fetch (deduplicated)
       if (customerId && !pendingChecks.current.has(feature)) {
@@ -174,7 +196,7 @@ export function CyncoPayProvider({
       }
       return { allowed: false, balance: null, limit: null, granted: null, usage: null, unlimited: false, overageAllowed: false };
     },
-    [client, customerId, entitlements],
+    [client, customerId],
   );
 
   const track = useCallback(
@@ -207,20 +229,20 @@ export function CyncoPayProvider({
 
   const refresh = useCallback(async () => {
     if (!customerId) return;
-    setEntitlements((prev) => {
-      const features = Array.from(prev.keys());
-      if (features.length === 0) return prev;
-      // Kick off async refresh, update state when done
-      Promise.all(
+    const features = Array.from(entitlementsRef.current.keys());
+    if (features.length === 0) return;
+
+    try {
+      const results = await Promise.all(
         features.map(async (feature) => {
           const result = await client.check(customerId, feature);
           return [feature, result] as const;
         }),
-      )
-        .then((results) => setEntitlements(new Map(results)))
-        .catch(() => {}); // non-fatal
-      return prev; // return unchanged synchronously
-    });
+      );
+      setEntitlements((prev) => new Map([...prev, ...results]));
+    } catch {
+      // non-fatal — keep existing entitlements
+    }
   }, [client, customerId]);
 
   const value = useMemo<CyncoPayContextValue>(
@@ -269,24 +291,6 @@ export function useCyncoPay(): CyncoPayContextValue {
 
 // ── useListPlans ─────────────────────────────────────────────────────────────
 
-interface Plan {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  isDefault: boolean;
-  isAddOn: boolean;
-  sortOrder: number;
-  prices: { id: string; amount: number; currency: string; billingInterval: string | null }[];
-  features: { slug: string; name: string; allowanceType: string; allowance: number | null }[];
-  customerEligibility: {
-    scenario: string;
-    currentSubscriptionId: string | null;
-    prorationAmount: number | null;
-    trialAvailable: boolean;
-  } | null;
-}
-
 /**
  * List plans with customer eligibility context.
  * Automatically includes the current customer's context from CyncoPayProvider.
@@ -328,7 +332,7 @@ export function useListPlans(): {
       .listPlans(ctx.customerId ?? undefined)
       .then((plans) => {
         if (fetchRef.current === id) {
-          setData(plans as Plan[]);
+          setData(plans);
           setLoading(false);
         }
       })
@@ -364,14 +368,14 @@ export function useAggregateEvents(options: {
   range?: "7d" | "14d" | "30d" | "90d" | "365d";
   groupBy?: "day" | "week" | "month";
 }): {
-  timeline: { period: string; count: number; total: number }[] | null;
-  total: { count: number; sum: number } | null;
+  timeline: UsageTimelineEntry[] | null;
+  total: UsageAggregation["total"] | null;
   loading: boolean;
 } {
   const ctx = usePayContext();
 
-  const [timeline, setTimeline] = useState<{ period: string; count: number; total: number }[] | null>(null);
-  const [total, setTotal] = useState<{ count: number; sum: number } | null>(null);
+  const [timeline, setTimeline] = useState<UsageTimelineEntry[] | null>(null);
+  const [total, setTotal] = useState<UsageAggregation["total"] | null>(null);
   const [loading, setLoading] = useState(true);
 
   const optionsKey = JSON.stringify(options);
@@ -405,16 +409,6 @@ export function useAggregateEvents(options: {
 
 // ── useSubscriptions ──────────────────────────────────────────────────────────
 
-interface SubscriptionInfo {
-  id: string;
-  status: string;
-  productSlug: string;
-  currentPeriodStart: string | null;
-  currentPeriodEnd: string | null;
-  cancelAtPeriodEnd: boolean;
-  quantity: number;
-}
-
 /**
  * Returns the current customer's subscriptions.
  *
@@ -427,13 +421,13 @@ interface SubscriptionInfo {
  * ```
  */
 export function useSubscriptions(): {
-  subscriptions: SubscriptionInfo[];
+  subscriptions: SubscriptionSummary[];
   loading: boolean;
   refresh: () => Promise<void>;
 } {
   const ctx = usePayContext();
 
-  const [subscriptions, setSubscriptions] = useState<SubscriptionInfo[]>([]);
+  const [subscriptions, setSubscriptions] = useState<SubscriptionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const fetchRef = useRef(0);
 
@@ -446,9 +440,8 @@ export function useSubscriptions(): {
       const customer = await ctx.client.getCustomer(ctx.customerId);
       if (fetchRef.current !== id) return;
 
-      const subs = (customer as Record<string, unknown>).subscriptions;
-      if (Array.isArray(subs)) {
-        setSubscriptions(subs as SubscriptionInfo[]);
+      if (Array.isArray(customer.subscriptions)) {
+        setSubscriptions(customer.subscriptions);
       }
     } catch {
       // non-fatal — keep stale data
@@ -493,9 +486,11 @@ export function useBalance(featureId: string): {
   const ctx = usePayContext();
 
   useEffect(() => {
-    ctx.check(featureId);
+    if (ctx.customerId) {
+      ctx.check(featureId);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [featureId]); // intentionally omit ctx.check to avoid re-render loop
+  }, [featureId, ctx.customerId]); // re-fetch when customer resolves or changes
 
   const cached = ctx.entitlements.get(featureId);
   return {
@@ -555,4 +550,152 @@ export function useEntity(entityId: string): {
   return { check, track };
 }
 
-export type { CyncoPayContextValue, CyncoPayProviderProps, Plan, SubscriptionInfo };
+// ── usePricingTable ──────────────────────────────────────────────────────────
+
+/**
+ * Fetch the pricing table for embedding in marketing sites.
+ * Uses the dedicated pricing table API endpoint with pre-formatted prices.
+ *
+ * ```tsx
+ * function PricingTable() {
+ *   const { plans, groups, loading } = usePricingTable();
+ *   if (loading) return <Spinner />;
+ *   return <PricingGrid plans={plans} groups={groups} />;
+ * }
+ * ```
+ */
+export function usePricingTable(): {
+  plans: PricingTablePlan[];
+  groups: { slug: string; planCount: number }[];
+  loading: boolean;
+  error: Error | null;
+} {
+  const ctx = usePayContext();
+  const [plans, setPlans] = useState<PricingTablePlan[]>([]);
+  const [groups, setGroups] = useState<{ slug: string; planCount: number }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    // Wait for customer resolution to avoid a wasted unauthenticated fetch
+    if (ctx.loading) return;
+    let cancelled = false;
+
+    ctx.client.getPricingTable(ctx.customerId ?? undefined)
+      .then((response) => {
+        if (!cancelled) {
+          setPlans(response.plans);
+          setGroups(response.groups);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setLoading(false);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [ctx.client, ctx.customerId, ctx.loading]);
+
+  return { plans, groups, loading, error };
+}
+
+// ── useValidateCoupon ────────────────────────────────────────────────────────
+
+/**
+ * Validate a coupon code for the current customer.
+ *
+ * ```tsx
+ * function CouponInput({ product, amount }: { product: string; amount: number }) {
+ *   const { validate, result, loading } = useValidateCoupon();
+ *   const [code, setCode] = useState("");
+ *
+ *   return (
+ *     <div>
+ *       <input value={code} onChange={(e) => setCode(e.target.value)} />
+ *       <button onClick={() => validate(code, product, amount)}>Apply</button>
+ *       {result?.valid && <span>You save {result.discountAmount}!</span>}
+ *     </div>
+ *   );
+ * }
+ * ```
+ */
+export function useValidateCoupon(): {
+  validate: (code: string, product: string, amount: number) => Promise<void>;
+  result: CouponValidation | null;
+  loading: boolean;
+} {
+  const ctx = usePayContext();
+  const [result, setResult] = useState<CouponValidation | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const validate = useCallback(
+    async (code: string, product: string, amount: number) => {
+      if (!ctx.customerId) return;
+      setLoading(true);
+      try {
+        const validation = await ctx.client.validateCoupon({
+          code,
+          customer: ctx.customerId,
+          product,
+          amount,
+        });
+        setResult(validation);
+      } catch (err) {
+        setResult({ valid: false, message: err instanceof Error ? err.message : "Validation failed" });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [ctx.client, ctx.customerId],
+  );
+
+  return { validate, result, loading };
+}
+
+// ── usePortal ────────────────────────────────────────────────────────────────
+
+/**
+ * Generate a customer billing portal URL.
+ *
+ * ```tsx
+ * function AccountPage() {
+ *   const { openPortal, loading } = usePortal();
+ *   return <button onClick={openPortal} disabled={loading}>Manage Billing</button>;
+ * }
+ * ```
+ */
+export function usePortal(): {
+  openPortal: () => Promise<void>;
+  portalUrl: string | null;
+  loading: boolean;
+} {
+  const ctx = usePayContext();
+  const [portalUrl, setPortalUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const openPortal = useCallback(async () => {
+    if (!ctx.customerId) return;
+    setLoading(true);
+    try {
+      const { url } = await ctx.client.portal(ctx.customerId);
+      setPortalUrl(url);
+      window.location.href = url;
+    } finally {
+      setLoading(false);
+    }
+  }, [ctx.client, ctx.customerId]);
+
+  return { openPortal, portalUrl, loading };
+}
+
+export type {
+  CyncoPayContextValue,
+  CyncoPayProviderProps,
+  Plan,
+  CustomerEligibility,
+  SubscriptionSummary,
+  PricingTablePlan,
+};

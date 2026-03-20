@@ -1,6 +1,6 @@
 {
   "name": "@cynco/pay",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Accept payments with 3 API calls. Accounting happens automatically.",
   "type": "module",
   "main": "./dist/index.js",
@@ -38,19 +38,24 @@
     }
   },
   "devDependencies": {
-    "react": "^19.0.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.0.0",
+    "happy-dom": "^20.8.4",
+    "react": "^19.0.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "@testing-library/dom": "^10.0.0",
+    "react-dom": "^19.0.0"
   },
   "license": "MIT",
-  "homepage": "https://github.com/cynco-tech/pay-sdk#readme",
+  "homepage": "https://github.com/cynco-tech/cynco-pay#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cynco-tech/pay-sdk"
+    "url": "https://github.com/cynco-tech/cynco-pay"
   },
   "bugs": {
-    "url": "https://github.com/cynco-tech/pay-sdk/issues"
+    "url": "https://github.com/cynco-tech/cynco-pay/issues"
   },
   "keywords": [
     "payments",
