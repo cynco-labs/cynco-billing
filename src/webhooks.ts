@@ -2,10 +2,10 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { WebhookEvent, WebhookEventType } from "./types.js";
 
 /**
- * Verify and parse a Cynco Pay webhook.
+ * Verify and parse a Cynco Billing webhook.
  *
  * ```ts
- * import { verifyWebhook } from "@cynco/pay/webhooks";
+ * import { verifyWebhook } from "@cynco/billing/webhooks";
  *
  * app.post("/webhooks/cynco", (req, res) => {
  *   const event = verifyWebhook(req.body, req.headers["x-cynco-signature"], secret);

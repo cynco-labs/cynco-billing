@@ -1,9 +1,9 @@
-# @cynco/pay
+# @cynco/billing
 
 Accept payments with 3 API calls. Accounting happens automatically.
 
 ```ts
-const pay = new CyncoPay({ key: "cp_sk_..." });
+const pay = new CyncoBilling({ key: "cp_sk_..." });
 
 // Subscribe a customer
 await pay.subscribe({ customer: "user_123", product: "pro", successUrl: "/thanks" });
@@ -22,7 +22,7 @@ Every payment auto-posts to the general ledger. One integration replaces Stripe 
 ## Install
 
 ```bash
-npm install @cynco/pay
+npm install @cynco/billing
 ```
 
 ## Quick Start (5 minutes)
@@ -41,9 +41,9 @@ curl -X POST https://app.cynco.io/api/v1/pay/api-keys \
 ### 2. Create a product
 
 ```ts
-import { CyncoPay } from "@cynco/pay";
+import { CyncoBilling } from "@cynco/billing";
 
-const pay = new CyncoPay({ key: process.env.CYNCO_PAY_SECRET_KEY });
+const pay = new CyncoBilling({ key: process.env.CYNCO_PAY_SECRET_KEY });
 
 await pay.createProduct({
   name: "Pro",
@@ -279,7 +279,7 @@ await pay.createBalance({ customer: "user_123", feature: "credits", grantedBalan
 ## Webhooks
 
 ```ts
-import { verifyWebhook } from "@cynco/pay/webhooks";
+import { verifyWebhook } from "@cynco/billing/webhooks";
 
 app.post("/webhooks/cynco", (req, res) => {
   const event = verifyWebhook(req.body, req.headers["x-cynco-signature"], SECRET);
@@ -315,18 +315,18 @@ const webhook = await pay.createWebhook({
 ## React
 
 ```tsx
-import { CyncoPayProvider, useCyncoPay, useBalance, useSubscriptions, useEntity } from "@cynco/pay/react";
+import { CyncoBillingProvider, useCyncoBilling, useBalance, useSubscriptions, useEntity } from "@cynco/billing/react";
 
 function App() {
   return (
-    <CyncoPayProvider publishableKey="cp_pk_..." customerId="user_123">
+    <CyncoBillingProvider publishableKey="cp_pk_..." customerId="user_123">
       <Dashboard />
-    </CyncoPayProvider>
+    </CyncoBillingProvider>
   );
 }
 
 function Dashboard() {
-  const { check, subscribe, track } = useCyncoPay();
+  const { check, subscribe, track } = useCyncoBilling();
   const { balance, granted, usage } = useBalance("api_calls");
   const { subscriptions } = useSubscriptions();
 
@@ -448,12 +448,12 @@ await pay.migrateCustomers("pprod_xxx", "pver_old_version_id");
 ## Error Handling
 
 ```ts
-import { CyncoPayError } from "@cynco/pay";
+import { CyncoBillingError } from "@cynco/billing";
 
 try {
   await pay.subscribe({ ... });
 } catch (err) {
-  if (err instanceof CyncoPayError) {
+  if (err instanceof CyncoBillingError) {
     console.log(err.code);    // "VALIDATION_ERROR"
     console.log(err.status);  // 422
     console.log(err.details); // [{ field: "customer", message: "required" }]
@@ -591,7 +591,7 @@ if (result.requiredAction) {
 
 ---
 
-## What Makes Cynco Pay Different
+## What Makes Cynco Billing Different
 
 - **Accounting built in.** Every charge auto-posts to the general ledger (DR Receivable 1200, CR Revenue 4001). No reconciliation needed.
 - **Balance locking.** Reserve tokens before an AI completion, finalize with actual usage. Purpose-built for AI SaaS.

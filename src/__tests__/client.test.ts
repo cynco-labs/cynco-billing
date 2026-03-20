@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { CyncoPay, CyncoPayError } from "../client.js";
+import { CyncoBilling, CyncoBillingError } from "../client.js";
 
 const mockFetch = vi.fn();
 
@@ -24,7 +24,7 @@ function err(code: string, message: string, status: number, details?: { field: s
 }
 
 function pay(key = "cp_sk_test") {
-  return new CyncoPay({ key, baseUrl: "https://test.cynco.io" });
+  return new CyncoBilling({ key, baseUrl: "https://test.cynco.io" });
 }
 
 function lastCall() {
@@ -39,18 +39,18 @@ function lastCall() {
 
 // ── Constructor ──────────────────────────────────────────────────────────────
 
-describe("CyncoPay constructor", () => {
+describe("CyncoBilling constructor", () => {
   it("throws if key is missing", () => {
-    expect(() => new CyncoPay({ key: "" })).toThrow("key is required");
+    expect(() => new CyncoBilling({ key: "" })).toThrow("key is required");
   });
 
   it("uses default base URL", () => {
-    const p = new CyncoPay({ key: "cp_sk_test" });
+    const p = new CyncoBilling({ key: "cp_sk_test" });
     expect(p).toBeDefined();
   });
 
   it("strips trailing slash from base URL", async () => {
-    const p = new CyncoPay({ key: "cp_sk_test", baseUrl: "https://test.cynco.io/" });
+    const p = new CyncoBilling({ key: "cp_sk_test", baseUrl: "https://test.cynco.io/" });
     mockFetch.mockResolvedValue(ok([]));
     await p.listProducts();
     expect(lastCall().url).toBe("https://test.cynco.io/api/v1/pay/products");
@@ -970,7 +970,7 @@ describe("rewards", () => {
 // ── Error Handling ───────────────────────────────────────────────────────────
 
 describe("error handling", () => {
-  it("throws CyncoPayError on 4xx with details", async () => {
+  it("throws CyncoBillingError on 4xx with details", async () => {
     mockFetch.mockResolvedValue(
       err("VALIDATION_ERROR", "Invalid input", 422, [{ field: "product", message: "Required" }]),
     );
@@ -979,8 +979,8 @@ describe("error handling", () => {
       await pay().subscribe({ customer: "user_1", product: "" });
       expect.unreachable("Should have thrown");
     } catch (e) {
-      expect(e).toBeInstanceOf(CyncoPayError);
-      const error = e as CyncoPayError;
+      expect(e).toBeInstanceOf(CyncoBillingError);
+      const error = e as CyncoBillingError;
       expect(error.code).toBe("VALIDATION_ERROR");
       expect(error.status).toBe(422);
       expect(error.details).toHaveLength(1);
@@ -988,7 +988,7 @@ describe("error handling", () => {
     }
   });
 
-  it("throws CyncoPayError on 401", async () => {
+  it("throws CyncoBillingError on 401", async () => {
     mockFetch.mockResolvedValue(
       err("UNAUTHORIZED", "Invalid API key", 401),
     );
@@ -997,12 +997,12 @@ describe("error handling", () => {
       await pay("cp_sk_invalid").check("user_1", "feature");
       expect.unreachable("Should have thrown");
     } catch (e) {
-      expect(e).toBeInstanceOf(CyncoPayError);
-      expect((e as CyncoPayError).code).toBe("UNAUTHORIZED");
+      expect(e).toBeInstanceOf(CyncoBillingError);
+      expect((e as CyncoBillingError).code).toBe("UNAUTHORIZED");
     }
   });
 
-  it("throws CyncoPayError on 403 for publishable key on secret-only endpoint", async () => {
+  it("throws CyncoBillingError on 403 for publishable key on secret-only endpoint", async () => {
     mockFetch.mockResolvedValue(
       err("FORBIDDEN", "Secret key required", 403),
     );
@@ -1011,13 +1011,13 @@ describe("error handling", () => {
       await pay("cp_pk_test").cancel("user_1");
       expect.unreachable("Should have thrown");
     } catch (e) {
-      expect(e).toBeInstanceOf(CyncoPayError);
-      expect((e as CyncoPayError).code).toBe("FORBIDDEN");
-      expect((e as CyncoPayError).status).toBe(403);
+      expect(e).toBeInstanceOf(CyncoBillingError);
+      expect((e as CyncoBillingError).code).toBe("FORBIDDEN");
+      expect((e as CyncoBillingError).status).toBe(403);
     }
   });
 
-  it("throws CyncoPayError on 429 concurrent request", async () => {
+  it("throws CyncoBillingError on 429 concurrent request", async () => {
     mockFetch.mockResolvedValue(
       err("CONCURRENT_REQUEST", "Another operation is in progress for this customer", 429),
     );
@@ -1026,8 +1026,8 @@ describe("error handling", () => {
       await pay().subscribe({ customer: "user_1", product: "pro" });
       expect.unreachable("Should have thrown");
     } catch (e) {
-      expect(e).toBeInstanceOf(CyncoPayError);
-      expect((e as CyncoPayError).code).toBe("CONCURRENT_REQUEST");
+      expect(e).toBeInstanceOf(CyncoBillingError);
+      expect((e as CyncoBillingError).code).toBe("CONCURRENT_REQUEST");
     }
   });
 
@@ -1042,9 +1042,9 @@ describe("error handling", () => {
       await pay().check("user_1", "feature");
       expect.unreachable("Should have thrown");
     } catch (e) {
-      expect(e).toBeInstanceOf(CyncoPayError);
-      expect((e as CyncoPayError).message).toBe("HTTP 500");
-      expect((e as CyncoPayError).code).toBe("REQUEST_FAILED");
+      expect(e).toBeInstanceOf(CyncoBillingError);
+      expect((e as CyncoBillingError).message).toBe("HTTP 500");
+      expect((e as CyncoBillingError).code).toBe("REQUEST_FAILED");
     }
   });
 
@@ -1062,8 +1062,8 @@ describe("error handling", () => {
       await pay().subscribe({ customer: "user_1", product: "nonexistent" });
       expect.unreachable("Should have thrown");
     } catch (e) {
-      expect(e).toBeInstanceOf(CyncoPayError);
-      expect((e as CyncoPayError).code).toBe("SUBSCRIBE_FAILED");
+      expect(e).toBeInstanceOf(CyncoBillingError);
+      expect((e as CyncoBillingError).code).toBe("SUBSCRIBE_FAILED");
     }
   });
 });
@@ -1072,7 +1072,7 @@ describe("error handling", () => {
 
 describe("api version", () => {
   it("sends API version header when configured", async () => {
-    const p = new CyncoPay({
+    const p = new CyncoBilling({
       key: "cp_sk_test",
       baseUrl: "https://test.cynco.io",
       apiVersion: "2026-03-19",
@@ -1081,13 +1081,13 @@ describe("api version", () => {
     mockFetch.mockResolvedValue(ok({ allowed: true }));
     await p.check("user_1", "feature");
 
-    expect(lastCall().headers["X-CyncoPay-Version"]).toBe("2026-03-19");
+    expect(lastCall().headers["X-CyncoBilling-Version"]).toBe("2026-03-19");
   });
 
   it("does not send API version header when not configured", async () => {
     mockFetch.mockResolvedValue(ok({ allowed: true }));
     await pay().check("user_1", "feature");
 
-    expect(lastCall().headers["X-CyncoPay-Version"]).toBeUndefined();
+    expect(lastCall().headers["X-CyncoBilling-Version"]).toBeUndefined();
   });
 });

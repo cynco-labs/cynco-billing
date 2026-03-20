@@ -1,13 +1,13 @@
 // ── Configuration ────────────────────────────────────────────────────────────
 
-export interface CyncoPayConfig {
+export interface CyncoBillingConfig {
   /** Secret key (cp_sk_...) for server-side operations, or publishable key (cp_pk_...) for client-side. */
   key: string;
   /** API base URL. Defaults to https://app.cynco.io */
   baseUrl?: string;
   /** Request timeout in milliseconds. Defaults to 10000. */
   timeout?: number;
-  /** API version (YYYY-MM-DD). Defaults to latest. Sent as X-CyncoPay-Version header. */
+  /** API version (YYYY-MM-DD). Defaults to latest. Sent as X-CyncoBilling-Version header. */
   apiVersion?: string;
 }
 

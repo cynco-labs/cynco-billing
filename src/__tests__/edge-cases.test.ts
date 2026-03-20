@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { CyncoPay, CyncoPayError } from "../client.js";
+import { CyncoBilling, CyncoBillingError } from "../client.js";
 
 const mockFetch = vi.fn();
 
@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 function pay() {
-  return new CyncoPay({ key: "cp_sk_test", baseUrl: "https://test.cynco.io" });
+  return new CyncoBilling({ key: "cp_sk_test", baseUrl: "https://test.cynco.io" });
 }
 
 function ok(data: unknown, status = 200) {
@@ -23,7 +23,7 @@ function ok(data: unknown, status = 200) {
 
 describe("timeout handling", () => {
   it("uses AbortSignal.timeout with configured timeout", async () => {
-    const client = new CyncoPay({
+    const client = new CyncoBilling({
       key: "cp_sk_test",
       baseUrl: "https://test.cynco.io",
       timeout: 5000,
@@ -120,8 +120,8 @@ describe("malformed responses", () => {
       await pay().check("user_1", "feature");
       expect.unreachable("Should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(CyncoPayError);
-      expect((err as CyncoPayError).code).toBe("EMPTY_RESPONSE");
+      expect(err).toBeInstanceOf(CyncoBillingError);
+      expect((err as CyncoBillingError).code).toBe("EMPTY_RESPONSE");
     }
   });
 
@@ -136,9 +136,9 @@ describe("malformed responses", () => {
       await pay().check("user_1", "feature");
       expect.unreachable("Should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(CyncoPayError);
-      expect((err as CyncoPayError).code).toBe("UNKNOWN");
-      expect((err as CyncoPayError).message).toBe("Unknown error");
+      expect(err).toBeInstanceOf(CyncoBillingError);
+      expect((err as CyncoBillingError).code).toBe("UNKNOWN");
+      expect((err as CyncoBillingError).message).toBe("Unknown error");
     }
   });
 
@@ -153,10 +153,10 @@ describe("malformed responses", () => {
       await pay().cancel("user_1");
       expect.unreachable("Should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(CyncoPayError);
-      expect((err as CyncoPayError).message).toBe("HTTP 502");
-      expect((err as CyncoPayError).code).toBe("REQUEST_FAILED");
-      expect((err as CyncoPayError).status).toBe(502);
+      expect(err).toBeInstanceOf(CyncoBillingError);
+      expect((err as CyncoBillingError).message).toBe("HTTP 502");
+      expect((err as CyncoBillingError).code).toBe("REQUEST_FAILED");
+      expect((err as CyncoBillingError).status).toBe(502);
     }
   });
 
@@ -171,9 +171,9 @@ describe("malformed responses", () => {
       await pay().analytics();
       expect.unreachable("Should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(CyncoPayError);
-      expect((err as CyncoPayError).message).toBe("HTTP 503");
-      expect((err as CyncoPayError).status).toBe(503);
+      expect(err).toBeInstanceOf(CyncoBillingError);
+      expect((err as CyncoBillingError).message).toBe("HTTP 503");
+      expect((err as CyncoBillingError).status).toBe(503);
     }
   });
 });
@@ -238,7 +238,7 @@ describe("request headers", () => {
   });
 
   it("sends API version header when configured", async () => {
-    const client = new CyncoPay({
+    const client = new CyncoBilling({
       key: "cp_sk_test",
       baseUrl: "https://test.cynco.io",
       apiVersion: "2026-03-19",
@@ -247,7 +247,7 @@ describe("request headers", () => {
     mockFetch.mockResolvedValue(ok({ allowed: true }));
     await client.check("user_1", "feature");
 
-    expect(mockFetch.mock.calls[0][1].headers["X-CyncoPay-Version"]).toBe("2026-03-19");
+    expect(mockFetch.mock.calls[0][1].headers["X-CyncoBilling-Version"]).toBe("2026-03-19");
   });
 
   it("sends Idempotency-Key header when provided", async () => {
@@ -274,7 +274,7 @@ describe("request headers", () => {
 
 describe("URL construction", () => {
   it("strips trailing slash from baseUrl", async () => {
-    const client = new CyncoPay({
+    const client = new CyncoBilling({
       key: "cp_sk_test",
       baseUrl: "https://test.cynco.io/",
     });
@@ -326,25 +326,25 @@ describe("URL construction", () => {
   });
 });
 
-// ── CyncoPayError ────────────────────────────────────────────────────────────
+// ── CyncoBillingError ────────────────────────────────────────────────────────────
 
-describe("CyncoPayError", () => {
+describe("CyncoBillingError", () => {
   it("has correct name property", () => {
-    const error = new CyncoPayError("test", "TEST", 400);
-    expect(error.name).toBe("CyncoPayError");
+    const error = new CyncoBillingError("test", "TEST", 400);
+    expect(error.name).toBe("CyncoBillingError");
     expect(error.message).toBe("test");
     expect(error.code).toBe("TEST");
     expect(error.status).toBe(400);
   });
 
   it("is instanceof Error", () => {
-    const error = new CyncoPayError("test", "TEST", 400);
+    const error = new CyncoBillingError("test", "TEST", 400);
     expect(error).toBeInstanceOf(Error);
-    expect(error).toBeInstanceOf(CyncoPayError);
+    expect(error).toBeInstanceOf(CyncoBillingError);
   });
 
   it("includes validation details", () => {
-    const error = new CyncoPayError("Invalid", "VALIDATION_ERROR", 422, [
+    const error = new CyncoBillingError("Invalid", "VALIDATION_ERROR", 422, [
       { field: "customer", message: "required" },
       { field: "product", message: "must be a string" },
     ]);
@@ -366,14 +366,14 @@ describe("CyncoPayError", () => {
     try {
       await pay().subscribe({ customer: "", product: "" });
     } catch (err) {
-      if (err instanceof CyncoPayError) {
+      if (err instanceof CyncoBillingError) {
         // This is the correct type narrowing pattern for SDK consumers
         expect(err.code).toBe("VALIDATION_ERROR");
         expect(err.status).toBe(422);
         return;
       }
     }
-    expect.unreachable("Should have caught CyncoPayError");
+    expect.unreachable("Should have caught CyncoBillingError");
   });
 });
 

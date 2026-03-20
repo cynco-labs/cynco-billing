@@ -1,5 +1,5 @@
 import type {
-  CyncoPayConfig,
+  CyncoBillingConfig,
   RequestOptions,
   PaginationParams,
   ApiResponse,
@@ -54,7 +54,7 @@ const DEFAULT_TIMEOUT = 10_000;
  * Cynco Pay SDK client.
  *
  * ```ts
- * const pay = new CyncoPay({ key: "cp_sk_..." });
+ * const pay = new CyncoBilling({ key: "cp_sk_..." });
  *
  * await pay.subscribe({ customer: "user_123", product: "pro", successUrl: "..." });
  * await pay.check("user_123", "api_calls");
@@ -62,15 +62,15 @@ const DEFAULT_TIMEOUT = 10_000;
  * await pay.cancel("user_123");
  * ```
  */
-export class CyncoPay {
+export class CyncoBilling {
   private readonly key: string;
   private readonly baseUrl: string;
   private readonly timeout: number;
   private readonly apiVersion: string | undefined;
 
-  constructor(config: CyncoPayConfig) {
+  constructor(config: CyncoBillingConfig) {
     if (!config.key) {
-      throw new Error("CyncoPay: key is required (cp_sk_... or cp_pk_...)");
+      throw new Error("CyncoBilling: key is required (cp_sk_... or cp_pk_...)");
     }
     this.key = config.key;
     this.baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
@@ -474,7 +474,7 @@ export class CyncoPay {
     };
 
     if (this.apiVersion) {
-      headers["X-CyncoPay-Version"] = this.apiVersion;
+      headers["X-CyncoBilling-Version"] = this.apiVersion;
     }
 
     if (options?.idempotencyKey) {
@@ -496,7 +496,7 @@ export class CyncoPay {
       const errorBody = await response.json().catch(() => null) as ApiResponse<never> | null;
       const message = errorBody?.error?.message ?? `HTTP ${response.status}`;
       const code = errorBody?.error?.code ?? "REQUEST_FAILED";
-      throw new CyncoPayError(message, code, response.status, errorBody?.error?.details);
+      throw new CyncoBillingError(message, code, response.status, errorBody?.error?.details);
     }
 
     // Handle 204 No Content
@@ -512,7 +512,7 @@ export class CyncoPay {
     }
 
     if (json.success === false) {
-      throw new CyncoPayError(
+      throw new CyncoBillingError(
         json.error?.message ?? "Unknown error",
         json.error?.code ?? "UNKNOWN",
         response.status,
@@ -521,7 +521,7 @@ export class CyncoPay {
     }
 
     if (json.data === undefined) {
-      throw new CyncoPayError("Empty response from server", "EMPTY_RESPONSE", response.status);
+      throw new CyncoBillingError("Empty response from server", "EMPTY_RESPONSE", response.status);
     }
 
     return json.data;
@@ -532,7 +532,7 @@ export class CyncoPay {
  * Error thrown by the Cynco Pay SDK.
  * Contains the error code and optional field-level validation details.
  */
-export class CyncoPayError extends Error {
+export class CyncoBillingError extends Error {
   constructor(
     message: string,
     public readonly code: string,
@@ -540,6 +540,6 @@ export class CyncoPayError extends Error {
     public readonly details?: { field: string; message: string }[],
   ) {
     super(message);
-    this.name = "CyncoPayError";
+    this.name = "CyncoBillingError";
   }
 }

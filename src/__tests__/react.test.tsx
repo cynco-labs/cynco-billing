@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { type ReactNode } from "react";
 import {
-  CyncoPayProvider,
-  useCyncoPay,
+  CyncoBillingProvider,
+  useCyncoBilling,
   useListPlans,
   useAggregateEvents,
   useSubscriptions,
@@ -39,46 +39,46 @@ function ok(data: unknown, status = 200) {
 
 function wrapper(props: { children: ReactNode }) {
   return (
-    <CyncoPayProvider
+    <CyncoBillingProvider
       publishableKey="cp_pk_test"
       customerId="user_1"
       baseUrl="https://test.cynco.io"
     >
       {props.children}
-    </CyncoPayProvider>
+    </CyncoBillingProvider>
   );
 }
 
 function wrapperWithPrefetch(props: { children: ReactNode }) {
   return (
-    <CyncoPayProvider
+    <CyncoBillingProvider
       publishableKey="cp_pk_test"
       customerId="user_1"
       baseUrl="https://test.cynco.io"
       prefetch={["api_calls", "sso"]}
     >
       {props.children}
-    </CyncoPayProvider>
+    </CyncoBillingProvider>
   );
 }
 
 function wrapperWithAsyncCustomer(props: { children: ReactNode }) {
   return (
-    <CyncoPayProvider
+    <CyncoBillingProvider
       publishableKey="cp_pk_test"
       customerId={async () => "async_user"}
       baseUrl="https://test.cynco.io"
     >
       {props.children}
-    </CyncoPayProvider>
+    </CyncoBillingProvider>
   );
 }
 
-// ── CyncoPayProvider ─────────────────────────────────────────────────────────
+// ── CyncoBillingProvider ─────────────────────────────────────────────────────────
 
-describe("CyncoPayProvider", () => {
+describe("CyncoBillingProvider", () => {
   it("provides context with string customer ID", async () => {
-    const { result } = renderHook(() => useCyncoPay(), { wrapper });
+    const { result } = renderHook(() => useCyncoBilling(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -90,7 +90,7 @@ describe("CyncoPayProvider", () => {
   });
 
   it("resolves async customer ID", async () => {
-    const { result } = renderHook(() => useCyncoPay(), {
+    const { result } = renderHook(() => useCyncoBilling(), {
       wrapper: wrapperWithAsyncCustomer,
     });
 
@@ -109,7 +109,7 @@ describe("CyncoPayProvider", () => {
       .mockResolvedValueOnce(ok({ allowed: true, balance: 9500, limit: 10000, unlimited: false, overageAllowed: false }))
       .mockResolvedValueOnce(ok({ allowed: true, balance: null, limit: null, unlimited: false, overageAllowed: false }));
 
-    const { result } = renderHook(() => useCyncoPay(), {
+    const { result } = renderHook(() => useCyncoBilling(), {
       wrapper: wrapperWithPrefetch,
     });
 
@@ -123,16 +123,16 @@ describe("CyncoPayProvider", () => {
   });
 });
 
-// ── useCyncoPay — throws outside provider ────────────────────────────────────
+// ── useCyncoBilling — throws outside provider ────────────────────────────────────
 
-describe("useCyncoPay", () => {
-  it("throws when used outside CyncoPayProvider", () => {
+describe("useCyncoBilling", () => {
+  it("throws when used outside CyncoBillingProvider", () => {
     // Suppress console.error from React's error boundary
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     expect(() => {
-      renderHook(() => useCyncoPay());
-    }).toThrow("must be used within <CyncoPayProvider>");
+      renderHook(() => useCyncoBilling());
+    }).toThrow("must be used within <CyncoBillingProvider>");
 
     spy.mockRestore();
   });
@@ -146,7 +146,7 @@ describe("check (context)", () => {
       ok({ allowed: true, balance: 500, limit: 1000, granted: 1000, usage: 500, unlimited: false, overageAllowed: false }),
     );
 
-    const { result } = renderHook(() => useCyncoPay(), { wrapper });
+    const { result } = renderHook(() => useCyncoBilling(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -171,7 +171,7 @@ describe("check (context)", () => {
       ok({ allowed: true, balance: 100, limit: 200, unlimited: false, overageAllowed: false }),
     );
 
-    const { result } = renderHook(() => useCyncoPay(), { wrapper });
+    const { result } = renderHook(() => useCyncoBilling(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -200,7 +200,7 @@ describe("subscribe (context)", () => {
       ok({ action: "activated", subscription: { id: "psub_1", status: "active" } }),
     );
 
-    const { result } = renderHook(() => useCyncoPay(), { wrapper });
+    const { result } = renderHook(() => useCyncoBilling(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -224,7 +224,7 @@ describe("subscribe (context)", () => {
       ok({ action: "checkout", url: "https://checkout.example/pay" }),
     );
 
-    const { result } = renderHook(() => useCyncoPay(), { wrapper });
+    const { result } = renderHook(() => useCyncoBilling(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -236,7 +236,7 @@ describe("subscribe (context)", () => {
   });
 
   it("throws before customer is resolved", async () => {
-    const { result } = renderHook(() => useCyncoPay(), {
+    const { result } = renderHook(() => useCyncoBilling(), {
       wrapper: wrapperWithAsyncCustomer,
     });
 
@@ -251,7 +251,7 @@ describe("subscribe (context)", () => {
   it("passes couponCode and fingerprint", async () => {
     mockFetch.mockResolvedValue(ok({ action: "checkout", url: "https://checkout.example/pay" }));
 
-    const { result } = renderHook(() => useCyncoPay(), { wrapper });
+    const { result } = renderHook(() => useCyncoBilling(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {
@@ -275,7 +275,7 @@ describe("track (context)", () => {
       ok({ recorded: true, allowed: true, balance: 99, limit: 100, unlimited: false, duplicate: false }),
     );
 
-    const { result } = renderHook(() => useCyncoPay(), { wrapper });
+    const { result } = renderHook(() => useCyncoBilling(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -293,7 +293,7 @@ describe("track (context)", () => {
   });
 
   it("throws before customer is resolved", async () => {
-    const { result } = renderHook(() => useCyncoPay(), {
+    const { result } = renderHook(() => useCyncoBilling(), {
       wrapper: wrapperWithAsyncCustomer,
     });
 
@@ -312,7 +312,7 @@ describe("refresh", () => {
       .mockResolvedValueOnce(ok({ allowed: true, balance: 100, limit: 200, unlimited: false, overageAllowed: false }))
       .mockResolvedValueOnce(ok({ allowed: true, balance: null, limit: null, unlimited: false, overageAllowed: false }));
 
-    const { result } = renderHook(() => useCyncoPay(), {
+    const { result } = renderHook(() => useCyncoBilling(), {
       wrapper: wrapperWithPrefetch,
     });
 
@@ -727,7 +727,7 @@ describe("prefetch merging", () => {
       .mockResolvedValueOnce(ok({ allowed: true, balance: 100, limit: 200, unlimited: false, overageAllowed: false }))
       .mockResolvedValueOnce(ok({ allowed: true, balance: null, limit: null, unlimited: false, overageAllowed: false }));
 
-    const { result } = renderHook(() => useCyncoPay(), {
+    const { result } = renderHook(() => useCyncoBilling(), {
       wrapper: wrapperWithPrefetch,
     });
 

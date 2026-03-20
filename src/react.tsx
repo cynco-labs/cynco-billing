@@ -8,7 +8,7 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
-import { CyncoPay, CyncoPayError } from "./client.js";
+import { CyncoBilling, CyncoBillingError } from "./client.js";
 import type {
   CheckResult,
   SubscribeResult,
@@ -26,11 +26,11 @@ import type {
 
 // ── Context ──────────────────────────────────────────────────────────────────
 
-interface CyncoPayContextValue {
-  client: CyncoPay;
+interface CyncoBillingContextValue {
+  client: CyncoBilling;
   customerId: string | null;
   loading: boolean;
-  error: CyncoPayError | null;
+  error: CyncoBillingError | null;
   entitlements: Map<string, CheckResult>;
 
   /** Subscribe the current customer to a product. */
@@ -52,17 +52,17 @@ interface CyncoPayContextValue {
   refresh: () => Promise<void>;
 }
 
-const CyncoPayContext = createContext<CyncoPayContextValue | null>(null);
+const CyncoBillingContext = createContext<CyncoBillingContextValue | null>(null);
 
-function usePayContext(): CyncoPayContextValue {
-  const ctx = useContext(CyncoPayContext);
-  if (!ctx) throw new Error("Cynco Pay hooks must be used within <CyncoPayProvider>");
+function usePayContext(): CyncoBillingContextValue {
+  const ctx = useContext(CyncoBillingContext);
+  if (!ctx) throw new Error("Cynco Pay hooks must be used within <CyncoBillingProvider>");
   return ctx;
 }
 
 // ── Provider ─────────────────────────────────────────────────────────────────
 
-interface CyncoPayProviderProps {
+interface CyncoBillingProviderProps {
   /** Publishable key (cp_pk_...) or secret key (cp_sk_... — only for SSR). */
   publishableKey: string;
   /** API base URL. Defaults to https://app.cynco.io */
@@ -74,15 +74,15 @@ interface CyncoPayProviderProps {
   children: ReactNode;
 }
 
-export function CyncoPayProvider({
+export function CyncoBillingProvider({
   publishableKey,
   baseUrl,
   customerId: customerIdProp,
   prefetch,
   children,
-}: CyncoPayProviderProps) {
+}: CyncoBillingProviderProps) {
   const client = useMemo(
-    () => new CyncoPay({ key: publishableKey, baseUrl }),
+    () => new CyncoBilling({ key: publishableKey, baseUrl }),
     [publishableKey, baseUrl],
   );
 
@@ -90,7 +90,7 @@ export function CyncoPayProvider({
     typeof customerIdProp === "string" ? customerIdProp : null,
   );
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<CyncoPayError | null>(null);
+  const [error, setError] = useState<CyncoBillingError | null>(null);
   const [entitlements, setEntitlements] = useState<Map<string, CheckResult>>(
     new Map(),
   );
@@ -146,7 +146,7 @@ export function CyncoPayProvider({
         setEntitlements((prev) => new Map([...prev, ...results]));
       })
       .catch((err) => {
-        if (!cancelled && err instanceof CyncoPayError) setError(err);
+        if (!cancelled && err instanceof CyncoBillingError) setError(err);
       });
 
     return () => { cancelled = true; };
@@ -245,7 +245,7 @@ export function CyncoPayProvider({
     }
   }, [client, customerId]);
 
-  const value = useMemo<CyncoPayContextValue>(
+  const value = useMemo<CyncoBillingContextValue>(
     () => ({
       client,
       customerId,
@@ -261,9 +261,9 @@ export function CyncoPayProvider({
   );
 
   return (
-    <CyncoPayContext.Provider value={value}>
+    <CyncoBillingContext.Provider value={value}>
       {children}
-    </CyncoPayContext.Provider>
+    </CyncoBillingContext.Provider>
   );
 }
 
@@ -274,7 +274,7 @@ export function CyncoPayProvider({
  *
  * ```tsx
  * function PricingPage() {
- *   const { subscribe, check } = useCyncoPay();
+ *   const { subscribe, check } = useCyncoBilling();
  *   const isPro = check("premium").allowed;
  *
  *   return (
@@ -285,7 +285,7 @@ export function CyncoPayProvider({
  * }
  * ```
  */
-export function useCyncoPay(): CyncoPayContextValue {
+export function useCyncoBilling(): CyncoBillingContextValue {
   return usePayContext();
 }
 
@@ -293,12 +293,12 @@ export function useCyncoPay(): CyncoPayContextValue {
 
 /**
  * List plans with customer eligibility context.
- * Automatically includes the current customer's context from CyncoPayProvider.
+ * Automatically includes the current customer's context from CyncoBillingProvider.
  *
  * ```tsx
  * function PricingPage() {
  *   const { data: plans } = useListPlans();
- *   const { subscribe } = useCyncoPay();
+ *   const { subscribe } = useCyncoBilling();
  *
  *   return plans?.map((plan) => (
  *     <button
@@ -692,8 +692,8 @@ export function usePortal(): {
 }
 
 export type {
-  CyncoPayContextValue,
-  CyncoPayProviderProps,
+  CyncoBillingContextValue,
+  CyncoBillingProviderProps,
   Plan,
   CustomerEligibility,
   SubscriptionSummary,

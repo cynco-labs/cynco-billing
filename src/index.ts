@@ -1,7 +1,7 @@
-export { CyncoPay, CyncoPayError } from "./client.js";
+export { CyncoBilling, CyncoBillingError } from "./client.js";
 export type {
   // Configuration
-  CyncoPayConfig,
+  CyncoBillingConfig,
   RequestOptions,
 
   // Pagination

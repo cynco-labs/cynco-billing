@@ -1,5 +1,5 @@
 {
-  "name": "@cynco/pay",
+  "name": "@cynco/billing",
   "version": "0.3.0",
   "description": "Accept payments with 3 API calls. Accounting happens automatically.",
   "type": "module",
@@ -49,13 +49,13 @@
     "react-dom": "^19.0.0"
   },
   "license": "MIT",
-  "homepage": "https://github.com/cynco-tech/cynco-pay#readme",
+  "homepage": "https://github.com/cynco-tech/cynco-billing#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cynco-tech/cynco-pay"
+    "url": "https://github.com/cynco-tech/cynco-billing"
   },
   "bugs": {
-    "url": "https://github.com/cynco-tech/cynco-pay/issues"
+    "url": "https://github.com/cynco-tech/cynco-billing/issues"
   },
   "keywords": [
     "payments",
