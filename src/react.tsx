@@ -56,7 +56,7 @@ const CyncoBillingContext = createContext<CyncoBillingContextValue | null>(null)
 
 function usePayContext(): CyncoBillingContextValue {
   const ctx = useContext(CyncoBillingContext);
-  if (!ctx) throw new Error("Cynco Pay hooks must be used within <CyncoBillingProvider>");
+  if (!ctx) throw new Error("Cynco Billing hooks must be used within <CyncoBillingProvider>");
   return ctx;
 }
 
@@ -270,7 +270,7 @@ export function CyncoBillingProvider({
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
 /**
- * Access Cynco Pay from any component.
+ * Access Cynco Billing from any component.
  *
  * ```tsx
  * function PricingPage() {
@@ -699,3 +699,222 @@ export type {
   SubscriptionSummary,
   PricingTablePlan,
 };
+
+// ── CyncoPricingTable (rendered component) ──────────────────────────────────
+
+/**
+ * Drop-in pricing table component. Fetches plans from the API and renders
+ * a responsive pricing grid with subscribe buttons.
+ *
+ * ```tsx
+ * <CyncoBillingProvider publishableKey="cp_pk_..." customerId="user_123">
+ *   <CyncoPricingTable
+ *     onSubscribe={(slug) => console.log("Subscribing to", slug)}
+ *     highlightPlan="pro"
+ *     columns={3}
+ *   />
+ * </CyncoBillingProvider>
+ * ```
+ */
+export function CyncoPricingTable({
+  onSubscribe,
+  highlightPlan,
+  columns = 3,
+  showFeatures = true,
+  ctaText = "Get Started",
+  currentPlanText = "Current Plan",
+  className,
+}: {
+  /** Called when user clicks subscribe. Receives the product slug. */
+  onSubscribe?: (productSlug: string, priceId?: string) => void;
+  /** Slug of the plan to visually highlight (e.g. "pro"). */
+  highlightPlan?: string;
+  /** Number of columns in the grid (1-4). */
+  columns?: 1 | 2 | 3 | 4;
+  /** Whether to show feature lists under each plan. */
+  showFeatures?: boolean;
+  /** Text for the subscribe button. */
+  ctaText?: string;
+  /** Text shown on the current plan button. */
+  currentPlanText?: string;
+  /** Additional CSS class for the container. */
+  className?: string;
+}): React.ReactElement {
+  const { plans, loading, error } = usePricingTable();
+  const ctx = usePayContext();
+
+  if (loading) {
+    return (
+      <div className={className} style={{ textAlign: "center", padding: "2rem" }}>
+        <p style={{ color: "#6b7280", fontSize: "0.875rem" }}>Loading plans...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={className} style={{ textAlign: "center", padding: "2rem" }}>
+        <p style={{ color: "#ef4444", fontSize: "0.875rem" }}>Failed to load pricing.</p>
+      </div>
+    );
+  }
+
+  const gridStyle: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: `repeat(${Math.min(columns, plans.length)}, 1fr)`,
+    gap: "1.5rem",
+    maxWidth: columns === 1 ? "24rem" : columns === 2 ? "48rem" : "72rem",
+    margin: "0 auto",
+  };
+
+  const handleSubscribe = async (slug: string, priceId?: string) => {
+    if (onSubscribe) {
+      onSubscribe(slug, priceId);
+      return;
+    }
+    // Default behavior: call subscribe via the SDK
+    if (!ctx.customerId) return;
+    try {
+      const result = await ctx.client.subscribe({
+        customer: ctx.customerId,
+        product: slug,
+        priceId,
+        successUrl: window.location.href,
+        cancelUrl: window.location.href,
+      });
+      if (result.checkoutUrl) {
+        window.location.href = result.checkoutUrl;
+      } else if (result.url) {
+        window.location.href = result.url;
+      }
+    } catch (err) {
+      console.error("[CyncoPricingTable] Subscribe failed:", err);
+    }
+  };
+
+  return (
+    <div className={className} style={gridStyle}>
+      {plans.map((plan) => {
+        const isHighlighted = plan.slug === highlightPlan;
+        const isCurrent = plan.customerEligibility?.scenario === "active";
+        const price = plan.prices[0]; // primary price
+
+        return (
+          <div
+            key={plan.id}
+            style={{
+              border: isHighlighted ? "2px solid #111827" : "1px solid #e5e7eb",
+              borderRadius: "0.75rem",
+              padding: "1.5rem",
+              display: "flex",
+              flexDirection: "column",
+              position: "relative",
+              backgroundColor: "#ffffff",
+            }}
+          >
+            {isHighlighted && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "-0.75rem",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  backgroundColor: "#111827",
+                  color: "#ffffff",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  padding: "0.125rem 0.75rem",
+                  borderRadius: "9999px",
+                }}
+              >
+                Popular
+              </div>
+            )}
+
+            <h3 style={{ fontSize: "1.125rem", fontWeight: 600, color: "#111827" }}>
+              {plan.name}
+            </h3>
+
+            {price && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <span style={{ fontSize: "2rem", fontWeight: 700, color: "#111827" }}>
+                  {price.amountFormatted}
+                </span>
+                {price.billingInterval && (
+                  <span style={{ fontSize: "0.875rem", color: "#6b7280", marginLeft: "0.25rem" }}>
+                    / {price.billingInterval}
+                  </span>
+                )}
+                {price.trialDays && price.trialDays > 0 && (
+                  <p style={{ fontSize: "0.75rem", color: "#059669", marginTop: "0.25rem" }}>
+                    {price.trialDays}-day free trial
+                  </p>
+                )}
+              </div>
+            )}
+
+            {showFeatures && plan.features.length > 0 && (
+              <ul
+                style={{
+                  listStyle: "none",
+                  padding: 0,
+                  margin: "1rem 0",
+                  flex: 1,
+                }}
+              >
+                {plan.features.map((f) => (
+                  <li
+                    key={f.slug}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                      fontSize: "0.875rem",
+                      color: "#374151",
+                      padding: "0.25rem 0",
+                    }}
+                  >
+                    <span style={{ color: "#10b981", fontSize: "1rem" }}>&#10003;</span>
+                    {f.unlimited
+                      ? `Unlimited ${f.name}`
+                      : f.allowance
+                        ? `${f.allowance.toLocaleString()} ${f.name}`
+                        : f.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <button
+              onClick={() => !isCurrent && handleSubscribe(plan.slug, price?.id)}
+              disabled={isCurrent}
+              style={{
+                marginTop: "auto",
+                width: "100%",
+                padding: "0.625rem 1rem",
+                borderRadius: "0.5rem",
+                border: isCurrent ? "1px solid #d1d5db" : "none",
+                backgroundColor: isCurrent
+                  ? "#ffffff"
+                  : isHighlighted
+                    ? "#111827"
+                    : "#f3f4f6",
+                color: isCurrent
+                  ? "#9ca3af"
+                  : isHighlighted
+                    ? "#ffffff"
+                    : "#111827",
+                fontSize: "0.875rem",
+                fontWeight: 600,
+                cursor: isCurrent ? "default" : "pointer",
+                transition: "background-color 0.15s",
+              }}
+            >
+              {isCurrent ? currentPlanText : ctaText}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

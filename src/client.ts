@@ -51,7 +51,7 @@ const DEFAULT_BASE_URL = "https://app.cynco.io";
 const DEFAULT_TIMEOUT = 10_000;
 
 /**
- * Cynco Pay SDK client.
+ * Cynco Billing SDK client.
  *
  * ```ts
  * const pay = new CyncoBilling({ key: "cp_sk_..." });
@@ -83,6 +83,35 @@ export class CyncoBilling {
   /** Subscribe a customer to a product. Handles new, upgrade, downgrade, and re-subscribe. */
   async subscribe(input: SubscribeInput, options?: RequestOptions): Promise<SubscribeResult> {
     return this.post("/api/v1/pay/subscribe", input, options);
+  }
+
+  /**
+   * Subscribe a customer to multiple products in one checkout.
+   * All products are purchased atomically — if one fails, none are charged.
+   *
+   * ```ts
+   * const result = await pay.multiAttach({
+   *   customer: "user_123",
+   *   products: [
+   *     { product: "pro", quantity: 1 },
+   *     { product: "ai_addon", quantity: 1 },
+   *   ],
+   *   successUrl: "https://app.com/thanks",
+   *   cancelUrl: "https://app.com/billing",
+   * });
+   *
+   * if (result.checkoutUrl) redirect(result.checkoutUrl);
+   * ```
+   */
+  async multiAttach(input: {
+    customer: string | { id: string; email: string; name: string };
+    products: Array<{ product: string; priceId?: string; quantity?: number }>;
+    successUrl: string;
+    cancelUrl: string;
+    couponCode?: string;
+    metadata?: Record<string, unknown>;
+  }, options?: RequestOptions): Promise<SubscribeResult> {
+    return this.post("/api/v1/pay/multi-attach", input, options);
   }
 
   /**
@@ -529,7 +558,7 @@ export class CyncoBilling {
 }
 
 /**
- * Error thrown by the Cynco Pay SDK.
+ * Error thrown by the Cynco Billing SDK.
  * Contains the error code and optional field-level validation details.
  */
 export class CyncoBillingError extends Error {

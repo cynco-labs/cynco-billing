@@ -74,8 +74,10 @@ export interface SubscribeInput {
 
 export interface SubscribeResult {
   action: "checkout" | "activated" | "scheduled" | "noop";
-  /** Checkout URL — redirect the customer here when action is "checkout". */
+  /** Gateway checkout URL (direct to payment provider). */
   url?: string;
+  /** Branded Cynco Billing checkout URL (recommended — shows plan summary before payment). */
+  checkoutUrl?: string;
   /** Checkout session ID for tracking. */
   checkoutId?: string;
   /** Subscription details when activated or scheduled. */

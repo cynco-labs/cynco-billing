@@ -43,7 +43,7 @@ curl -X POST https://app.cynco.io/api/v1/pay/api-keys \
 ```ts
 import { CyncoBilling } from "@cynco/billing";
 
-const pay = new CyncoBilling({ key: process.env.CYNCO_PAY_SECRET_KEY });
+const pay = new CyncoBilling({ key: process.env.CYNCO_BILLING_SECRET_KEY });
 
 await pay.createProduct({
   name: "Pro",
@@ -596,7 +596,7 @@ if (result.requiredAction) {
 - **Accounting built in.** Every charge auto-posts to the general ledger (DR Receivable 1200, CR Revenue 4001). No reconciliation needed.
 - **Balance locking.** Reserve tokens before an AI completion, finalize with actual usage. Purpose-built for AI SaaS.
 - **CHIP + Stripe.** Malaysian payment gateway native. Not just a Stripe wrapper.
-- **Zero infrastructure.** No Redis, no queues, no external services. Postgres advisory locks for concurrency. All-in-one.
+- **Redis-accelerated entitlements.** Sub-millisecond `/check` and `/track` via Redis with Lua atomic operations. Falls through to Postgres transparently if Redis is unavailable.
 - **Per-customer locking.** Billing operations are serialized per customer. No double-charges from race conditions.
 - **API idempotency.** `Idempotency-Key` header on all billing endpoints. Safe retries.
 
